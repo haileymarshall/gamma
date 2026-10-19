@@ -40,6 +40,8 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
   - Claiming is the only exit.
   - The fee is 80% right after the Harvest, falls linearly to 10% at 24h, then stays at 10% forever.
   - The fee is split ⅓ burned, ⅓ to all harvested-but-unclaimed winnings (pro rata, which replaces staking) and ⅓ to tonight's Harvest.
+  - Nobody earns a bonus from their own fee, however a claim is split: the part of a claimant's fee that falls on their own still-unclaimed batches is passed on to the other holders at their next claim (`selfBonusIndex`).
+- **Donations:** `donate(amount)` adds GAMMA to today's Harvest. GAMMA sent with a plain transfer is credited the same way by `sweep()`, which anyone can call.
 - **Hook fee:**
   - 99% at pool open, falling 1 point per minute, 3% forever from minute 96.
   - Always taken in GAMMA. Exact-output buys ("buy exactly X GAMMA"), the one swap shape that would pay in IMD, are refused: buy with an exact IMD amount instead.
@@ -52,9 +54,10 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
 | IMD launches mint a fixed 1B token and take 10% for the swarm | Rescaled ×100,000. The swarm's 10% replaces the NFT airdrop, `poolBps = 1000`, and the remaining 800M (`remainderTo`) goes to the game |
 | Block-hash randomness is weak, and worse on an L2 sequencer | Each epoch is seeded by the first **drand evmnet** round after it closes. Its BLS signature is verified on-chain on BN254 (`DrandBeacon`), and the frontend attaches the signature to purchases. There is no block-data fallback: any fallback would let whoever settles choose between two public draws. A drand round can be proven at any later time, so a beacon outage only delays settlement and never changes an outcome (trust assumption: drand evmnet keeps publishing) |
 | Mainnet gas | Deployed on **Robinhood Chain** (Arbitrum Nitro). A normal purchase costs ~180k gas |
-| Immutable code with no audit | 106 Foundry tests (unit, fuzz, invariant solvency), drand checked against real signatures on a Robinhood fork, IMD's `audit-imported-code` + audit panel at launch, an optional IMD `audit` job (`launch/00-audit.json`), and a **7-day launch guardrail** (2,000 energies per machine per epoch) that lifts by itself |
+| Immutable code with no audit | 111 Foundry tests (unit, fuzz, invariant solvency), drand checked against real signatures on a Robinhood fork, IMD's `audit-imported-code` + audit panel at launch, an optional IMD `audit` job (`launch/00-audit.json`), and a **7-day launch guardrail** (2,000 energies per machine per epoch) that lifts by itself |
 | No admin, but a one-time wiring step | `configurator` can call `initialize(poolKey)` exactly once and nothing else. The key must name the pool the `GammaHook` bound to this game was initialized with, so a mistyped key is rejected (a deliberately crafted fake hook and token can still pass: that remains a trust assumption on the configurator) |
-| A hook fee was credited on the hook's word | `onHookFee` only credits GAMMA or IMD that actually arrived (`gammaHeld` mirrors the game's balance) |
+| A hook fee was credited on the hook's word | `onHookFee` only credits GAMMA that actually arrived (`gammaHeld` mirrors the game's balance) |
+| Claiming batch by batch recovered the bonus third of one's own fee | Each owner's share of the bonus index is tracked (`selfBonusIndex`); a claim pays the same in one call or many |
 
 See `ADAPTATION.md` for the changes made for the IMD launch and the audit findings behind them.
 
