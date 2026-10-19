@@ -1,4 +1,4 @@
-// The GAMMA rules, mirrored from contracts/src for charts, estimates and the demo.
+// The GAMMA rules, mirrored from src/ for charts, estimates and the demo.
 
 export const EPOCH_SECONDS = 600;
 export const EPOCHS_PER_DAY = 144;

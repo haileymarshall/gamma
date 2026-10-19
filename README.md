@@ -8,7 +8,7 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
 
 | Path | What |
 |---|---|
-| `contracts/` | Foundry project: `GammaGame`, `GammaHook` (Uniswap v4), `DrandBeacon`, `GammaEmission`, tests |
+| `src/`, `test/`, `script/`, `lib/` | Foundry project at the repo root (IMD imports require it): `GammaGame`, `GammaHook` (Uniswap v4), `DrandBeacon`, `GammaEmission`, tests |
 | `frontend/` | Next.js app: live mode against the deployed contracts, demo mode (simulation) otherwise |
 | `launch/` | `launch.open` / audit request bodies for api.imd.fun |
 | `PROJECT.md` | Project log: goal, hackathon rules, decisions, build log, checklist |
@@ -59,7 +59,6 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
 
 ```bash
 # contracts
-cd contracts
 forge build && forge test
 
 # full local stack (anvil)
@@ -68,7 +67,7 @@ forge script script/DeployLocal.s.sol --rpc-url http://127.0.0.1:8545 --broadcas
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
 # frontend (demo mode without env vars)
-cd ../frontend
+cd frontend
 pnpm install && pnpm dev
 ```
 
@@ -76,7 +75,7 @@ Live mode: copy `frontend/.env.example` to `frontend/.env.local` and fill in the
 
 ## Launch through IMD (Robinhood Chain, chain 4663)
 
-1. Push this repo to a **public** GitHub repo. `contracts/foundry.toml` already sets `bytecode_hash = "none"`, as IMD requires.
+1. Push this repo to a **public** GitHub repo. `foundry.toml` (at the repo root, as IMD requires) already sets `bytecode_hash = "none"`, as IMD requires.
 2. Resolve the commit with `POST https://api.imd.fun/requests/import`, then put `repoUrl` and `baseCommit` into the files in `launch/`.
 3. Submit `launch/01-game.json` (`evm_contracts`): deploys `DrandBeacon` and `GammaGame` with your wallet as `configurator`.
 4. Put the game address into `launch/02-hook.json` as the `GAME_ADDRESS` placeholders, then submit it (`univ4_hook`, `pairWith: imd`): deploys GAMMA, the hook and the pool, sends 10% to the pool and 80% to the game.

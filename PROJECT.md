@@ -18,7 +18,7 @@ Win a top-5 spot in the **Identity MD (IMD) Hackathon** by shipping a working pr
   - Robinhood Chain to keep gas low
   - a 7-day guardrail that lifts by itself
   - a fallback seed so funds can never freeze
-- **Contracts** (`contracts/`):
+- **Contracts** (Foundry project at the repo root):
   - GammaGame, GammaHook (Uniswap v4), DrandBeacon, GammaEmission and GammaToken (local and test runs only)
   - 54 Foundry tests passing (unit, fuzz, invariant)
   - drand verified against real signatures, including on a Robinhood Chain fork
@@ -125,7 +125,7 @@ Judges reward what helps IMD itself: paid demand for the swarm and oracle (its w
 
 ## Build log
 - 2026-10-18: Wrote GAMMA from scratch.
-  - **Contracts** (`contracts/`, Foundry, solc 0.8.26):
+  - **Contracts** (repo root, Foundry, solc 0.8.26):
     - `GammaGame`: epochs, machines, Shares, Harvest, claim fee, unclaimed bonus, swaps through Uniswap v4 unlock.
     - `GammaHook`: v4 hook with a 99%→3% fee, sent to the Harvest.
     - `DrandBeacon`: drand evmnet BLS verification on BN254, using vendored randa-mu/bls-solidity (MIT).
