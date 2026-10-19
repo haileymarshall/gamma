@@ -41,13 +41,14 @@ contract DeployLocal is Script {
         MockERC20 imd = new MockERC20("Identity.md (test)", "IMD", 18);
         DrandBeacon beacon = new DrandBeacon();
         GammaGame game = new GammaGame(IPoolManager(address(manager)), ERC20(address(imd)), beacon, me);
-        GammaToken gamma = new GammaToken(me);
+        GammaToken gamma = new GammaToken();
 
         uint160 flags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG
             | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
         bytes memory args = abi.encode(address(manager), address(imd), address(game));
         (address hookAddr, bytes32 salt) = HookMiner.find(CREATE2_DEPLOYER, flags, type(GammaHook).creationCode, args);
-        GammaHook hook = new GammaHook{salt: salt}(IPoolManager(address(manager)), address(imd), IGammaGame(address(game)));
+        GammaHook hook =
+            new GammaHook{salt: salt}(IPoolManager(address(manager)), address(imd), IGammaGame(address(game)));
         require(address(hook) == hookAddr, "hook address");
 
         bool gammaIs0 = address(gamma) < address(imd);

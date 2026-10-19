@@ -23,6 +23,10 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
 | IMD swarm | 100,000,000 (10%) | 8% to identity.md NFT seats, 2% to the agents that built the launch |
 | Team / presale / treasury | 0 | |
 
+`src/GammaToken.sol:GammaToken` is the launch token. Its nonpayable constructor takes no arguments and mints
+exactly `10^27` minor units (18 decimals) to its caller, the launch factory. The factory makes the three allocations;
+the token has no post-construction mint or administrative functions and takes no transfer fee.
+
 **Emission.** Year 1 releases exactly 500M, starting at ~3.28M/day and halving every 120 days. After that, each epoch releases a fixed fraction of the 300M left (0.1327%/day), forever, halving every ~522 days, with no jump at the switch. Computed in closed form (`GammaEmission`), so any range of epochs costs O(log n).
 
 ## Rules
@@ -43,9 +47,24 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
   - Nobody earns a bonus from their own fee, however a claim is split: the part of a claimant's fee that falls on their own still-unclaimed batches is passed on to the other holders at their next claim (`selfBonusIndex`).
 - **Donations:** `donate(amount)` adds GAMMA to today's Harvest. GAMMA sent with a plain transfer is credited the same way by `sweep()`, which anyone can call.
 - **Hook fee:**
-  - 99% at pool open, falling 1 point per minute, 3% forever from minute 96.
+  - 99% at pool open, held there until the game's genesis is set; decay starts at the later of pool creation and
+    genesis. It falls 1 percentage point per complete minute, reaching 3% forever from minute 96.
   - Always taken in GAMMA. Exact-output buys ("buy exactly X GAMMA"), the one swap shape that would pay in IMD, are refused: buy with an exact IMD amount instead.
-  - 100% goes to the Harvest. The game's own swaps are exempt.
+  - Exact-input buys pay on realised GAMMA output. Both sell shapes pay the scheduled fraction of the seller's
+    total GAMMA payment: exact-output sells add `poolInput * feeBps / (10000 - feeBps)` to the pool input.
+    Integer fee division rounds down.
+  - Exact-input sells are **full fill or revert**. If the price limit or lack of liquidity leaves some of the
+    net input unspent, `PartialFillSellNotSupported` reverts the whole swap, including its fee. This prevents a fee
+    on the unspent offer. A price limit is still respected; use a smaller sell or an exact-output sell for a partial fill.
+  - 100% goes to the Harvest. Before genesis, delivered fees accumulate above the 800M Reserve and the existing
+    `GammaGame.initialize` credits that surplus to day 0. Trading at 99% therefore works before game initialization.
+  - Normally the fee is transferred and reported during the swap. If the PoolManager does not yet hold enough
+    GAMMA (the seller settles after the hook returns), the hook holds the fee as an ERC-6909 claim in `pendingFees`.
+    Anyone can call `GammaHook.redeemFees()` after the swap's unlock finishes, including later in the same transaction.
+    It burns available claims and sends all proceeds to the fixed game; it cannot pay the caller or change recipients.
+    Redemption can be partial if the manager's balance is short. A delayed redemption funds the Harvest **on receipt**,
+    not a past day's Harvest. Integrators should redeem promptly; no backend signer or owner is required.
+  - The game's own swaps are exempt. The pool's separate LP fee is 12,500 (1.25%), with tick spacing 60.
 
 ## What changed from the first design
 
@@ -81,14 +100,31 @@ Live mode: copy `frontend/.env.example` to `frontend/.env.local` and fill in the
 
 ## Launch through IMD (Robinhood Chain, chain 4663)
 
-1. Push this repo to a **public** GitHub repo. `foundry.toml` (at the repo root, as IMD requires) already sets `bytecode_hash = "none"`, as IMD requires.
-2. Resolve the commit with `POST https://api.imd.fun/requests/import`, then put `repoUrl` and `baseCommit` into the files in `launch/`.
-3. Submit `launch/01-game.json` (`evm_contracts`): deploys `DrandBeacon` and `GammaGame` with your wallet as `configurator`.
-4. Put the game address into `launch/02-hook.json` as the `GAME_ADDRESS` placeholders, then submit it (`univ4_hook`, `pairWith: imd`): deploys GAMMA, the hook and the pool, sends 10% to the pool and 80% to the game.
-5. `forge script script/InitializeGame.s.sol` with `GAME`, `GAMMA`, `HOOK`, `LP_FEE`, `TICK_SPACING` from the launch record (`GET /launches/:id`).
-6. Set the frontend env vars and deploy the frontend.
+This assignment launches only `GammaToken` and `GammaHook`. GammaGame already exists at
+`0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535`; the game and beacon sources remain here for local integration tests.
 
-Each paid action costs 0.5 IMD, paid with x402 or the onchain Intake contract. See https://imd.fun/docs/.
+The hook's unchanged nonpayable constructor is `(IPoolManager poolManager, address imd, IGammaGame game)`.
+The manifest step supplies `$poolManager`, the IMD pair `0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127`, and that game,
+in that order. It makes no external calls during construction. GAMMA is discovered from the initialized PoolKey.
+The launch factory creates the hook and initializes its pool in the same transaction. It allocates 10% to the
+pool, 10% to the network's distributor, and the complete 80% remainder (800M GAMMA) to the game.
+The deployer determines the opening price from the policy's 2,500 IMD opening market cap and token ordering.
+
+After the launch, the game's existing configurator uses `script/InitializeGame.s.sol` with `GAME` set to the address
+above, `GAMMA` and `HOOK` from the accepted launch record, `LP_FEE=12500`, and `TICK_SPACING=60`. The game checks that
+its balance is at least `RESERVE` (800M) and that the hook's game and pool id match before starting genesis. This
+step is already scripted; it starts gameplay and fee decay, while ordinary swaps can run at 99% beforehand. A
+failed attempt leaves the game uninitialized and can be retried with the correct key. No deployment or signing
+is part of this adaptation, and the later manifest step writes `launch.json`.
+
+The hook implements `IHooks` directly and keeps exactly six permissions: `beforeInitialize`, `afterInitialize`,
+`beforeSwap`, `afterSwap`, `beforeSwapReturnDelta`, `afterSwapReturnDelta` (address bits `0x30cc`). CREATE2 salt mining
+must use the final bytecode, constructor arguments and actual factory address; `script/HookMiner.sol` provides the
+internal mining helper. Every enabled callback and the claim redemption callback requires the PoolManager. The
+hook has no owner, shares, signer, upgrade path, LP fee override or liquidity-removal callbacks. It uses checked
+delta casts and the manager's `take` / `mint` / `burn` settlement operations, without its own transient storage.
+
+The files in `launch/` describe the earlier request workflow; they are not this adaptation's deployment manifest.
 
 ## Risks
 

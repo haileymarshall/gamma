@@ -3,21 +3,25 @@ pragma solidity ^0.8.26;
 
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
+import {SafeCast} from "v4-core/src/libraries/SafeCast.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
-import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/src/types/BalanceDelta.sol";
+import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "v4-core/src/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
 
 import {IGammaGame} from "./interfaces/IGammaGame.sol";
 
 /// @title GammaHook
-/// @notice Uniswap v4 hook for the GAMMA/IMD pool. Every trade pays a fee that starts at 99% at launch and falls
-/// one point per minute to 3% forever (from minute 96). 100% of it goes to today's Harvest: snipers and traders
-/// pay the miners. Every fee is taken in GAMMA: exact-output buys, the one shape that would pay in IMD, are refused
-/// (buy with an exact IMD input instead). The game's own purchases are exempt. No owner.
-contract GammaHook is IHooks {
+/// @notice Uniswap v4 hook for GAMMA/IMD. Fees stay at 99% until genesis, then fall one point per minute from
+/// the later of genesis and pool creation to 3% forever (minute 96). All fees are GAMMA for the game's Harvest.
+/// A fee the manager cannot transfer yet is held as a claim for permissionless redemption to the game.
+/// Exact-output buys are refused (buy with exact IMD input instead); exact-input sells must fill completely.
+/// The game's own swaps are exempt. No owner.
+contract GammaHook is IHooks, IUnlockCallback {
+    using SafeCast for uint256;
     uint256 public constant BPS = 10_000;
     uint256 public constant START_FEE_BPS = 9_900;
     uint256 public constant FLOOR_FEE_BPS = 300;
@@ -32,13 +36,19 @@ contract GammaHook is IHooks {
     bytes32 public poolId;
     uint64 public launchedAt;
 
+    /// @notice GAMMA fees held as PoolManager claims until its token balance can pay the game.
+    uint256 public pendingFees;
+
     event TradingFee(address indexed currency, uint256 amount, uint256 feeBps);
+    event FeesDeferred(uint256 amount);
+    event FeesRedeemed(uint256 amount);
 
     error NotPoolManager();
     error PoolAlreadySet();
     error NotImdPair();
     error HookNotImplemented();
     error ExactOutputBuyNotSupported();
+    error PartialFillSellNotSupported();
 
     constructor(IPoolManager poolManager_, address imd_, IGammaGame game_) {
         poolManager = poolManager_;
@@ -73,7 +83,7 @@ contract GammaHook is IHooks {
 
     /// @notice Current trading fee: 99% at launch (counted from the game's genesis), -1 point per minute, 3% from minute 96.
     function feeBps() public view returns (uint256) {
-        // The decay starts when trading can start: the later of pool creation and the game's genesis.
+        // Decay starts only after both pool creation and the game's genesis; earlier trades still pay 99%.
         uint256 start = game.genesis();
         if (launchedAt == 0 || start == 0) return START_FEE_BPS;
         if (launchedAt > start) start = launchedAt;
@@ -100,58 +110,95 @@ contract GammaHook is IHooks {
 
     // ------------------------------------------------------------------ swaps
 
-    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+    function beforeSwap(address sender, PoolKey calldata, SwapParams calldata params, bytes calldata)
         external
+        view
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         if (sender == address(game)) return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         // Exact-output buys would pay the fee in IMD; refuse them so the Harvest only ever receives GAMMA.
         if (params.amountSpecified > 0 && !_inputIsGamma(params)) revert ExactOutputBuyNotSupported();
-        // Exact-input sells: take the fee from the GAMMA going in, before it is swapped.
+        // Reserve the sell fee from the specified input. Collection waits until afterSwap verifies a full fill.
         if (params.amountSpecified < 0 && _inputIsGamma(params)) {
             uint256 fee = uint256(-params.amountSpecified) * feeBps() / BPS;
-            if (fee > 0) {
-                _collect(gamma, fee);
-                return (IHooks.beforeSwap.selector, toBeforeSwapDelta(int128(int256(fee)), 0), 0);
-            }
+            return (IHooks.beforeSwap.selector, toBeforeSwapDelta(fee.toInt128(), 0), 0);
         }
-        key; // silence unused
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
-    function afterSwap(
-        address sender,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        BalanceDelta delta,
-        bytes calldata
-    ) external onlyPoolManager returns (bytes4, int128) {
+    function afterSwap(address sender, PoolKey calldata, SwapParams calldata params, BalanceDelta delta, bytes calldata)
+        external
+        onlyPoolManager
+        returns (bytes4, int128)
+    {
         if (sender == address(game)) return (IHooks.afterSwap.selector, 0);
 
-        bool exactIn = params.amountSpecified < 0;
-        if (exactIn && _inputIsGamma(params)) return (IHooks.afterSwap.selector, 0); // charged in beforeSwap
+        uint256 rate = feeBps();
+        int256 gammaDelta = gammaIs0 ? delta.amount0() : delta.amount1();
+        uint256 amount = uint256(gammaDelta < 0 ? -gammaDelta : gammaDelta);
+        bool sell = _inputIsGamma(params);
+        if (params.amountSpecified < 0 && sell) {
+            uint256 requested = uint256(-params.amountSpecified);
+            uint256 reservedFee = requested * rate / BPS;
+            // afterSwap can only return an unspecified (IMD) delta here, so it cannot refund a GAMMA fee.
+            // Revert the entire trade if the price limit or available liquidity leaves input unspent.
+            if (amount != requested - reservedFee) revert PartialFillSellNotSupported();
+            if (reservedFee > 0) _collect(reservedFee, rate);
+            return (IHooks.afterSwap.selector, 0); // fee already reserved by the specified beforeSwap delta
+        }
 
-        // Unspecified side, always GAMMA: the output of an exact-input buy, or the input of an exact-output sell.
-        bool specifiedIs0 = exactIn == params.zeroForOne;
-        (Currency feeCurrency, int128 amount) =
-            specifiedIs0 ? (key.currency1, delta.amount1()) : (key.currency0, delta.amount0());
-        if (amount < 0) amount = -amount;
-
-        uint256 fee = uint256(uint128(amount)) * feeBps() / BPS;
+        // Buys: fee is a share of the realised GAMMA output. Exact-output sells: gross up the realised
+        // GAMMA input so the Harvest gets rate/BPS of the seller's total payment, just as for exact input.
+        uint256 fee = amount * rate / (sell ? BPS - rate : BPS);
         if (fee == 0) return (IHooks.afterSwap.selector, 0);
-        _collect(feeCurrency, fee);
-        return (IHooks.afterSwap.selector, int128(int256(fee)));
+        int128 feeDelta = fee.toInt128();
+        _collect(fee, rate);
+        return (IHooks.afterSwap.selector, feeDelta);
     }
 
     function _inputIsGamma(SwapParams calldata params) internal view returns (bool) {
         return params.zeroForOne == gammaIs0;
     }
 
-    function _collect(Currency currency, uint256 amount) internal {
-        poolManager.take(currency, address(game), amount);
-        game.onHookFee(currency, amount);
-        emit TradingFee(Currency.unwrap(currency), amount, feeBps());
+    function _collect(uint256 amount, uint256 rate) internal {
+        // The router has not settled its input yet. A large sell must not depend on existing GAMMA reserves.
+        if (gamma.balanceOf(address(poolManager)) >= amount) {
+            _sendToGame(amount);
+        } else {
+            pendingFees += amount;
+            poolManager.mint(address(this), gamma.toId(), amount);
+            emit FeesDeferred(amount);
+        }
+        emit TradingFee(Currency.unwrap(gamma), amount, rate);
+    }
+
+    function _sendToGame(uint256 amount) internal {
+        poolManager.take(gamma, address(game), amount);
+        // Before genesis the existing game's initialize credits all surplus above its 800M Reserve to day 0.
+        // Calling onHookFee before that wiring would revert NotHook and freeze ordinary trading.
+        if (game.genesis() != 0) game.onHookFee(gamma, amount);
+    }
+
+    /// @notice Anyone may redeem deferred fees after the swap's unlock completes. All GAMMA goes to the game;
+    /// the game credits the Harvest on receipt (day 0 if redeemed before genesis). No caller can redirect it.
+    function redeemFees() external returns (uint256 amount) {
+        if (pendingFees == 0) return 0;
+        return abi.decode(poolManager.unlock(""), (uint256));
+    }
+
+    /// @inheritdoc IUnlockCallback
+    function unlockCallback(bytes calldata) external onlyPoolManager returns (bytes memory) {
+        uint256 amount = pendingFees;
+        uint256 available = gamma.balanceOf(address(poolManager));
+        if (amount > available) amount = available;
+        if (amount > 0) {
+            pendingFees -= amount;
+            poolManager.burn(address(this), gamma.toId(), amount);
+            _sendToGame(amount);
+            emit FeesRedeemed(amount);
+        }
+        return abi.encode(amount);
     }
 
     // ------------------------------------------------------------------ not enabled

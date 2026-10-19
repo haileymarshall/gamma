@@ -1,0 +1,32 @@
+{
+  "kind": "univ4_hook",
+  "hook": {
+    "contract": "GammaHook",
+    "constructorArgs": [
+      "$poolManager",
+      "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127",
+      "0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535"
+    ],
+    "permissions": [
+      "beforeInitialize",
+      "afterInitialize",
+      "beforeSwap",
+      "afterSwap",
+      "beforeSwapReturnDelta",
+      "afterSwapReturnDelta"
+    ]
+  },
+  "token": {
+    "contract": "GammaToken",
+    "name": "Gamma",
+    "symbol": "GAMMA",
+    "decimals": 18
+  },
+  "pool": {
+    "pairedCurrency": "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127",
+    "fee": 12500,
+    "tickSpacing": 60,
+    "initialPrice": "79228162514264337593543950336"
+  },
+  "notes": "GammaHook in src/GammaHook.sol serves one GAMMA/IMD pool and discovers GAMMA from its PoolKey at initialization. GammaToken in src/GammaToken.sol is Gamma (GAMMA), with 18 decimals and no constructor arguments. All enabled hook callbacks require the PoolManager. The hook accepts the listed 12500 LP fee (1.25%); its own swap fee is additional. The hook fee starts at 9900 bps (99%) and remains there until GammaGame.genesis() is set. It then falls by 100 bps per completed minute from the later of pool initialization and genesis, reaching a permanent 300 bps (3%) floor at minute 96. All hook fees are GAMMA: exact-input buys pay from realized GAMMA output; exact-input sells reserve the fee from the specified GAMMA input and revert with PartialFillSellNotSupported unless the remaining input fills completely; exact-output sells gross up the realized GAMMA input so the fee is the scheduled fraction of the total GAMMA payment. Non-game exact-output buys revert with ExactOutputBuyNotSupported. Swaps whose sender is GammaGame are exempt. All collected fees go to the fixed GammaGame constructor address for its Harvest. If the manager lacks sufficient GAMMA during a swap, the hook records PoolManager claims and pendingFees; anyone can call redeemFees after the unlock completes to pay available GAMMA only to the game, which credits Harvest on receipt. Before genesis, transfers skip onHookFee and the game's initialization credits the surplus to day 0. The hook has no owner-only functions or backend signer. The manifest records the required initialPrice; the deployer derives the actual opening price from the separate launch policy."
+}

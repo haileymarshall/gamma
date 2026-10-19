@@ -72,7 +72,7 @@ contract GammaRealBeaconTest is GammaFixture {
         uint256 roundTime = uint256(realBeacon.GENESIS()) + (uint256(ROUND) - 1) * realBeacon.PERIOD();
         vm.warp(roundTime - 10 minutes - 6);
         realGame = new GammaGame(manager, imd, IGammaBeacon(address(realBeacon)), address(this));
-        realGamma = new GammaToken(address(this));
+        realGamma = new GammaToken();
 
         uint160 flags = uint160(address(hook)) & ((1 << 14) - 1);
         address realHook = address(uint160(0x8888 << 144) | flags);

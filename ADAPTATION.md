@@ -1,4 +1,166 @@
-# Adaptation for the IMD `evm_contracts` launch
+# Adaptation for the GAMMA Uniswap v4 hook launch
+
+This section describes the current assignment. The earlier game-launch history is retained below for provenance;
+its statements about which contracts this launch deploys and about pre-genesis trading are superseded here.
+
+## Launch interface and unchanged behavior
+
+This launch creates exactly `src/GammaToken.sol:GammaToken` and `src/GammaHook.sol:GammaHook` on chain 4663.
+The existing game recipient is `0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535`, and the pair is IMD at
+`0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127`. The hook constructor stays
+`(IPoolManager poolManager, address imd, IGammaGame game)`: the manifest step supplies `$poolManager` first,
+then those two existing addresses. It takes no owner or signer and makes no external constructor calls.
+The token constructor is described below. No helper contract or new dependency is deployed.
+
+The 99% start fee, 100-bps-per-minute decay, 3% permanent floor from minute 96, genesis hold, game exemption,
+GAMMA-only fees and `ExactOutputBuyNotSupported` restriction remain. The later of pool creation and genesis is
+still the clock's start. Exactly the six requested hook permissions remain enabled (address mask `0x30cc`).
+The pool accepts the launch's 12,500 LP fee and 60 tick spacing. No LP fee override or liquidity withdrawal gate
+was added. The factory's zero-liquidity fee collection and withdrawal are tested.
+
+The factory allocates 10% to its pool, 10% to the network's distributor and 80% (800M GAMMA) to the existing game.
+`GammaGame.RESERVE()` is exactly that 80%; the factory rehearsal verifies the amount before calling the game's
+existing initialization. The existing `script/InitializeGame.s.sol` performs the configurator's one-time wiring
+with the actual launch token, hook, 12,500 fee and 60 spacing. Gameplay still needs that step. Its source and the
+beacon/emission/game rules were not changed in this assignment.
+
+## Changes and reproduced findings
+
+### Token constructor required by the launch
+
+- `src/GammaToken.sol`: removed the recipient argument. The nonpayable, zero-argument constructor mints exactly
+  `1_000_000_000e18` to `msg.sender`, the factory. Name `Gamma`, symbol `GAMMA`, 18 decimals, plain transfers and
+  absence of a post-launch mint/admin capability are preserved. Allocation remains the factory's responsibility.
+- `script/DeployLocal.s.sol`, `test/utils/GammaFixture.sol`, `test/GammaRealBeacon.t.sol`: updated the three existing
+  construction sites. The shared test fixture also has overridable IMD deployment/game-start helpers, so regression
+  tests can exercise both currency orders and the actual pre-genesis state without altering game storage.
+- Tests: `test/GammaHookLaunch.t.sol` covers factory deployment, metadata/supply/transfers, absence of mint/admin
+  entrypoints, constructor operation without live dependencies, exact permission bits, runtime size/opcodes,
+  allocation, initialization, LP fee collection and liquidity withdrawal.
+
+### d8ec1fd7a17e9d83cb6233cf81f6bf14d5e8119ff522373a104baed5ab252359 — exact-output sell fee basis (medium)
+
+Reproduced with the supplied proof copied to scratch before editing the hook: its expected 9900-bps assertion
+failed at **4974 bps**. The old fee was `poolInput * rate / 10000`, added to the seller's payment.
+
+`src/GammaHook.sol:afterSwap` now charges `poolInput * rate / (10000 - rate)`, rounding down, so the fee is the
+scheduled share of the seller's gross GAMMA payment. The scheduled fee never reaches 100%, so the denominator is
+positive. GAMMA magnitudes are computed in `int256`, and fee deltas use the vendored internal `SafeCast` to reject
+unrepresentable deltas instead of truncating them. No linked library is needed.
+
+Tests: the supplied proof passes after the change. `test/GammaHookAudit.t.sol` compares both sell shapes from the
+same pool snapshot, fuzzes the entire decay window/floor and different output sizes, and tests an exact-output
+partial sell. All these run with GAMMA as both currency0 and currency1. Delta overflow, tiny-fee rounding and
+all four game-exempt swap shapes have dedicated tests.
+
+### 7d9173333bca3b67ebd4f1288c3d257b29b8df1bb141322ec0ebc8d3005e3309 — partial exact-input sell overcharge (low)
+
+Reproduced before editing: a tight limit swapped about **10,126.58 GAMMA** while the Harvest took **300,000 GAMMA**
+from the 10M offer.
+
+`src/GammaHook.sol` still reserves the exact-input fee with the specified `beforeSwap` delta, but postpones actual
+collection until `afterSwap` confirms that the entire net input was consumed. Otherwise it reverts
+`PartialFillSellNotSupported`, rolling back the trade, fee, claims and pool state. Full-fill sells keep their
+original economics. A v4 afterSwap return delta can only change the unspecified side (IMD here), so it cannot
+refund a GAMMA input fee. Atomic rejection is the narrow fix that avoids a custom swap engine or charging IMD.
+This is an explicit limitation: a partially filled exact-input sell no longer succeeds. Tight limits are allowed
+when the net input fills; exact-output sells support partial execution with fees on realised input.
+
+Tests cover atomic rollback of balances, Harvest and price at the auditor's limit, a reachable tight limit, and
+exact-output partial fills, in both currency orders. README documents this full-fill requirement.
+
+### 9f20a96d21571a7533e7def07d9a8bbfa4fac2aa1f725b317d55cd99f6fea910 — pre-genesis freeze (low)
+
+Reproduced before editing with the real uninitialized `GammaGame`: both a buy and a sell reverted while
+`feeBps()` reported 9900 and genesis was zero.
+
+`src/GammaHook.sol:_sendToGame` still delivers GAMMA directly, but calls `onHookFee` only after genesis is nonzero.
+Before genesis the unchanged game's `initialize` already credits its entire balance above the 800M Reserve to
+day 0; those fees are therefore accounted exactly once when the game starts. This fixes ordinary trading without
+changing the deployed game's code or requiring a new configurator privilege. The fee stays at 99% until genesis.
+
+Tests execute pre-genesis buys/sells, then initialize and verify the exact surplus/Harvest/held-token identity,
+the first decay boundary, and that `sweep()` cannot credit those fees again. They also redeem pre-genesis claims
+both before and after game initialization.
+
+### 086a052ee4e05d354cabe2c48a2507b3bd8e2a06994f2ebfed09d6e264a02dbe — insufficient manager balance for sell fee (low)
+
+Reproduced before editing: after a large buy depleted the manager's GAMMA, the 40M sell reverted because its 1.2M
+fee exceeded the manager's current balance, while a 1,000 GAMMA sell succeeded.
+
+`src/GammaHook.sol:_collect` transfers immediately when the manager holds enough GAMMA. Otherwise it mints an
+ERC-6909 claim to the hook and tracks it in `pendingFees`; the return delta still charges the correct full fee.
+This claim is fully backed when the router settles and the manager completes its unlock. The existing game's
+`onHookFee` only accepts actual token receipts, so claims are held by the hook rather than credited against the
+Reserve or sent to a game with no claim-redemption interface.
+
+New permissionless `redeemFees()` unlocks the manager, burns up to the available amount and delivers every token
+to the immutable game. Its `unlockCallback` requires the PoolManager and accepts no recipient or arbitrary call
+from callback data. Pending accounting is decreased before external calls. `FeesDeferred` and `FeesRedeemed`
+expose this flow; `TradingFee` records each assessed fee only once. No owner, approval, signer or extra contract
+was introduced. Repeated redemption cannot pay twice.
+
+Timing limitation: the existing game credits a fee to the Harvest **when GAMMA arrives**. A claim redeemed on a
+later day funds that later day's Harvest. Anyone can redeem immediately after the swap's unlock (even later in
+the same transaction); integrators should do so promptly. Redemption never converts to ETH or IMD, and a redeemer
+cannot change the destination. Partial/no-balance redemptions retain the rest as claims. This is the claim fallback
+allowed by the launch reference and required by the reproduced liveness finding.
+
+Tests cover exact-input and exact-output sells whose fees exceed the manager balance, first-day and floor fees,
+full/partial/zero/repeated redemption, fixed recipient, delayed-day credit and claim balances. A stateful fuzz test
+exercises repeated large sells with optional intermediate redemptions and checks that every fee is delivered or
+remains fully backed as a claim. Every successful
+swap/redemption checks that the manager is locked, all temporary deltas are zero and claims equal `pendingFees`.
+
+### 9644ebd243dba1811a9506ade08988a7efef54a2f01274032ff0ccc4671b41e8 — informational scope record
+
+This is not a defect. All four behavioral findings reproduced; none was dismissed as non-reproducible. The pinned
+hook, owner and token floors and the supplied security/address/L2 references were read. Local review covered the
+hook, token, their interfaces, game initialization/fee accounting, emission reserve, factory behavior and the
+vendored PoolManager/Hooks delta/claim semantics. Existing game/beacon tests remain in the full suite.
+
+The six enabled callbacks and the new unlock callback require the manager. Caller-controlled hookData cannot
+spoof the game's exemption. beforeSwap never consumes the entire offer as a no-op: its fee is bounded by 99%, and
+a partial-fill rejection cannot keep tokens. Each fee take or claim mint is balanced by the corresponding hook
+return delta; redemption pairs a claim burn with a take of the same GAMMA amount. No transfer approvals or external
+library links were added. GAMMA remains a standard non-rebasing, non-fee-on-transfer ERC-20.
+
+Live bytecode/state of the supplied Robinhood contracts was not fork-verified here. Local integration uses the
+repository's real GammaGame and Uniswap v4 PoolManager; the later launch rehearsal must confirm that the existing
+game exposes this same genesis, initialization and fee-accounting behavior. No deployment, signing, Slither,
+Mythril or formal-verification result is claimed.
+
+## Documentation
+
+`README.md` now identifies the actual two-contract hook launch, constructor order, existing game recipient,
+factory allocations, pool terms, one-time game wiring, permission bits, partial-fill restriction and
+claim-redemption timing. This `ADAPTATION.md` records every current change and audit disposition while preserving
+the older game-launch history below.
+
+## Verification
+
+The tests use the unchanged project configuration (Solidity 0.8.26, Cancun, optimizer 200, via IR), no RPC or
+secrets. The supplied fuzz seed is
+`0xc31fb712ebeaa008d470d5984f995d00581280e79dcf2a30b234d1841af693a1`.
+
+- `forge build`: passed, no compiler warnings.
+- `FOUNDRY_FUZZ_SEED=0xc31fb712ebeaa008d470d5984f995d00581280e79dcf2a30b234d1841af693a1 forge test`:
+  **163 passed, 0 failed, 0 skipped**, across 24 suites, with scratch Solidity excluded. This includes the new
+  hook/factory/token regressions and all existing game, beacon, emission, fuzz and invariant suites.
+- Invariant campaigns: game solvency/supply 64 runs x 64 calls; accounting 128 x 96; state machine 48 x 64,
+  each with zero unexpected reverts. The new fee/claim fuzz properties run 512 cases each in both currency orders.
+- The imported exact-output proof failed on the original hook and passed on the fixed hook in the earlier full
+  run; it is scratch-only. Durable regression tests cover that same scenario in both token orders.
+- Hook runtime: 5,342 bytes. Token runtime: 2,532 bytes. Both are under EIP-170 and have empty library link
+  references; the factory tests also scan their runtime opcodes.
+- `git diff --check`: passed. No protected build/dependency path was changed.
+
+Build configuration, dependencies, lockfiles, `.gitmodules`, `lib/`, `.github/`, environment files and frontend
+were not modified. No manifest was written. Scratch reproductions are verification-only and are not deliverables.
+
+---
+
+# Historical adaptation for the earlier IMD `evm_contracts` launch
 
 Launch: Robinhood Chain (chain id 4663), kind `evm_contracts`, two contracts in this order:
 
