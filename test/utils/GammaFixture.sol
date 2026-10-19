@@ -70,9 +70,9 @@ abstract contract GammaFixture is Test {
         manager = new PoolManager(address(this));
         lpRouter = new PoolModifyLiquidityTest(manager);
         swapRouter = new PoolSwapTest(manager);
-        imd = new MockERC20("Identity.md", "IMD", 18);
+        imd = deployImd();
         beacon = new MockBeacon();
-        gamma = new GammaToken(address(this));
+        gamma = new GammaToken();
 
         game = new GammaGame(IPoolManager(address(manager)), ERC20(address(imd)), beacon, address(this));
 
@@ -108,7 +108,7 @@ abstract contract GammaFixture is Test {
             ""
         );
 
-        game.initialize(key);
+        initializeGame();
 
         address[3] memory players = [alice, bob, carol];
         for (uint256 i; i < 3; ++i) {
@@ -121,6 +121,14 @@ abstract contract GammaFixture is Test {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    function deployImd() internal virtual returns (MockERC20) {
+        return new MockERC20("Identity.md", "IMD", 18);
+    }
+
+    function initializeGame() internal virtual {
+        game.initialize(key);
+    }
 
     function buy(address who, uint8 machine, uint256 energies) internal returns (uint256 id) {
         vm.prank(who);
