@@ -5,7 +5,11 @@
 ## Goal
 Win a top-5 spot in the **Identity MD (IMD) Hackathon** by shipping a working project, launched through the IMD Protocol, that adds real use for IMD (its swarm, oracle or token) beyond a plain token.
 
-## Status (2026-10-18, 3 days before the deadline)
+## Status
+
+> **Current state and next steps: see `HANDOFF.md`** (updated 2026-10-19 08:00 UTC). The section below is the 2026-10-18 snapshot.
+
+### Snapshot (2026-10-18)
 
 ### Done
 - **Research**
@@ -162,7 +166,8 @@ Judges reward what helps IMD itself: paid demand for the swarm and oracle (its w
   - The prize "deployer" on the radar is IMD's factory for every IMD launch; IMD records the paying wallet onchain.
   - Launch 2210 (job `137fee05…`) was **parked, not deployed**: after 3 fix rounds two medium findings remained (IMD-fee swap price could be leaned on; block-hash fallback gave the settler a choice of draws). 0.5 IMD spent.
   - Merged the swarm's audited fixes, then removed both mechanisms: the hook refuses exact-output buys so fees are GAMMA-only, and seeding is drand-only with no fallback. 106 tests pass. Commit `baf28a8`.
-  - Relaunch paid (tx `0xefc7…7bc3`), job `a95d8284-6bc6-479d-ac62-7e115d14a150`. Wallet has ~0.02 IMD left: the hook launch needs ~0.5 IMD more.
+  - Relaunch paid (tx `0xefc7…7bc3`), job `a95d8284-6bc6-479d-ac62-7e115d14a150`. Launch 2215 went live 07:29 UTC: GammaGame `0xb333…8535`, DrandBeacon `0x50f1…a3a5`. Merged delivered commit `ee52608` (132 tests).
+  - Bought 0.5 IMD more; paid the hook launch (tx `0x91a4…0ff5`) at ~07:35 UTC. Not yet registered by IMD at 08:00 UTC.
 
 ## Submission checklist
 - [x] Pick name + idea (GAMMA)
@@ -171,8 +176,8 @@ Judges reward what helps IMD itself: paid demand for the swarm and oracle (its w
 - [x] Push to a **public** GitHub repo and resolve the commit with `POST /requests/import`
 - [x] Fill `repoUrl` and `baseCommit` in `launch/*.json` (no `owner`: the payer is the owner)
 - [x] Skip `launch/00-audit.json`: every launch already runs the audit panel
-- [x] Submit `launch/01-game.json` (0.5 IMD) — paid; waiting for the GammaGame address
-- [ ] Fill `GAME_ADDRESS` in `launch/02-hook.json` and submit it (0.5 IMD)
+- [x] Submit `launch/01-game.json` — launch 2210 parked; relaunch 2215 live: GammaGame `0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535`
+- [x] Fill `GAME_ADDRESS` in `launch/02-hook.json` and submit it (0.5 IMD) — paid, waiting for IMD to admit it
 - [ ] Run `InitializeGame.s.sol` with the pool from the launch record
 - [ ] Commit to sending the paying wallet's 1% LP fee share to the Harvest (`donate`)
 - [ ] Deploy the frontend with the live env vars
