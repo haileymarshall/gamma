@@ -9,7 +9,10 @@ Background and rules are in `PROJECT.md`; game rules in `README.md`; every audit
 `0xd1a32f0eb6472e436856df6393c6a5ffc15d8009590023ffe42c07fb6367804f`, genesis 1792428445 = 2026-10-19 ~19:00 UTC).
 The frontend defaults to live mode against these addresses and passes `pnpm build`.
 
-**Next: deploy the frontend to Vercel (ask the user first), the user creates the X account, then submit.**
+**Frontend is live at https://gamma-snowy.vercel.app** (Vercel project `haileymarshalls-projects/gamma`, root `frontend/`,
+connected to the GitHub repo so pushes to `main` redeploy).
+
+**Next: the user creates the X account, then submit.**
 
 ## What is live
 
