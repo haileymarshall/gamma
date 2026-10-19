@@ -53,10 +53,13 @@ export function useLiveGame(): [GameView | null, GameActions] {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [now, setNow] = useState(() => Date.now() / 1000);
+  // The clock is read only in the browser: prerendering cannot depend on the current time.
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now() / 1000), 1000);
+    const tick = () => setNow(Date.now() / 1000);
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -75,7 +78,7 @@ export function useLiveGame(): [GameView | null, GameActions] {
   });
   const [genesisR, epochR, burnedR, energiesR, cursorR, pendingR, keyR] = core.data ?? [];
   const genesis = Number(genesisR?.result ?? 0n);
-  const epoch = genesis ? Math.floor((now - genesis) / EPOCH_SECONDS) : Number(epochR?.result ?? 0n);
+  const epoch = genesis && now ? Math.floor((now - genesis) / EPOCH_SECONDS) : Number(epochR?.result ?? 0n);
   const day = Math.floor(epoch / EPOCHS_PER_DAY);
   const pendingRound = Number(pendingR?.result ?? 0n);
 

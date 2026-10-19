@@ -1,61 +1,51 @@
 # Handoff: where the GAMMA launch stands
 
-Last updated: 2026-10-19 08:00 UTC. Hackathon deadline: **21 Oct 2026** (submit at imdradar.site/hackathon).
+Last updated: 2026-10-19 19:10 UTC. Hackathon deadline: **21 Oct 2026** (submit at imdradar.site/hackathon).
 Background and rules are in `PROJECT.md`; game rules in `README.md`; every audit change in `ADAPTATION.md`.
 
 ## Where we stopped
 
-**Waiting for IMD to register the hook launch payment.** Paid on Robinhood Chain at ~07:35 UTC:
+**GAMMA is live on Robinhood Chain and the game clock is running** (`initialize` tx
+`0xd1a32f0eb6472e436856df6393c6a5ffc15d8009590023ffe42c07fb6367804f`, genesis 1792428445 = 2026-10-19 ~19:00 UTC).
+The frontend defaults to live mode against these addresses and passes `pnpm build`.
 
-- tx `0x91a43c22d487f313fb28fa33d09855af69504f016d1ac0950541556e560f0ff5` (status 1, 0.5 IMD moved, Intake
-  `Requested` event emitted).
-- As of 08:00 UTC `GET https://api.imd.fun/intake/4663/<tx>` still returns `unknown_transaction`, and the order is not
-  in `GET /requests/paid-by/0x4de63474f3715c407dafaa1429fa664559814401`. The two earlier payments were picked up in
-  seconds, so this is a delay on IMD's side. If it never shows up, ask IMD (@imdradar / identity.md) about the tx.
-
-Once it is admitted, the response carries `admission.result.jobId`. Watch `GET /jobs/<jobId>` until `state` is
-`completed`, then `GET /launches/<launch.id>` until `status` is `live` (or `parked`, with `parkedReason`).
+**Next: deploy the frontend to Vercel (ask the user first), the user creates the X account, then submit.**
 
 ## What is live
 
 | What | Address (Robinhood Chain, 4663) |
 |---|---|
-| GammaGame (IMD launch 2215, job `a95d8284-6bc6-479d-ac62-7e115d14a150`) | `0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535` |
-| DrandBeacon | `0x50f1a83477de01069731ab796eba9fd6456aa3a5` |
+| GammaGame (IMD launch 2215) | `0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535` |
+| DrandBeacon (launch 2215) | `0x50f1a83477de01069731ab796eba9fd6456aa3a5` |
+| GAMMA token (launch 2232) | `0xb30749417fd209f4bfc0a0270375fff8e30a0b44` |
+| GammaHook (launch 2232) | `0x066fa23e6f598838824c2d172d3abd88bcad70cc` |
+| MerkleDistributor (swarm's 10%, launch 2232) | `0x3b70b52ab3a15357b55673818b48b15fcea80f8c` |
+| GAMMA/IMD pool key | currency0 IMD, currency1 GAMMA, fee 12500, tickSpacing 60, hooks = GammaHook |
 | Launch wallet (payer, owner, `configurator`) | `0x4De63474F3715C407DaFAa1429FA664559814401` |
-| Swap router we deployed (Uniswap `PoolSwapTest`, used to buy IMD) | `0x0a8c4623A15eE743357855a28F07d14d37DF268B` |
+| Swap router we deployed (Uniswap `PoolSwapTest`) | `0x0a8c4623A15eE743357855a28F07d14d37DF268B` |
 | IMD token | `0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127` |
 | Uniswap v4 PoolManager | `0x8366a39cc670b4001a1121b8f6a443a643e40951` |
 | IMD Intake | `0xa43e6f75ee006411f79ac1c84120606c2330de82` |
 
-Verified on chain: game `configurator` = launch wallet, `imd`, `poolManager`, `beacon` correct, `genesis` = 0
-(waiting for `initialize`).
+Verified on chain before `initialize`: supply 1B; game held 800M + 66 wei; `hook.game()` = game;
+`hook.poolId()` = keccak256 of the pool key; hook fee 99%. After: `genesis` set, `gamma` and `hook` wired.
 
-The launch wallet's key is in `~/.gamma/deployer.env` on the user's machine (never committed). `launch/pay.sh` signs
-with it. The user has their own copy. Balance after the hook payment: ~0.02 IMD, ~0.0014 ETH.
+IMD jobs: 2210 `137fee05-7413-46fb-b03b-45db0221ea93` (parked), 2215 `a95d8284-6bc6-479d-ac62-7e115d14a150`
+(game, live), 2232 `3512e06f-1cd8-41ea-84f6-8e31b7bb985e` (hook, live; IMD took ~6h to register its payment).
+
+The launch wallet's key is in `~/.gamma/deployer.env` on the user's machine (never committed). The user has their own
+copy. Balance: ~0.02 IMD, ~0.0013 ETH.
 
 ## Remaining steps
 
-1. **Hook launch deploys** (`launch/02-hook.json`, kind `univ4_hook`, paired with IMD, `poolBps` 1000,
-   `remainderTo` = GammaGame). It creates GAMMA, GammaHook and the GAMMA/IMD pool and sends 800M GAMMA to the game.
-   If IMD's adapt step changes `src/GammaHook.sol`, merge the delivered commit (as done for 2210 and 2215) and check
-   the hook still exposes `game()` and `poolId()` and charges fees only in GAMMA.
-2. **Wire the game** from the launch wallet, once, with the pool from `GET /launches/<id>`:
-   ```
-   source ~/.gamma/deployer.env
-   GAME=0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535 GAMMA=<token> HOOK=<hook> LP_FEE=<fee> TICK_SPACING=<spacing> \
-     forge script script/InitializeGame.s.sol --rpc-url https://rpc.mainnet.chain.robinhood.com \
-     --broadcast --private-key $GAMMA_PRIVATE_KEY
-   ```
-   `initialize` checks `hook.game() == game` and `hook.poolId() == keccak256(abi.encode(key))`, so a wrong key
-   reverts with `BadPool` and can be retried. It starts the clock (`genesis`) and the hook's 99% launch fee.
-3. **Frontend live mode**: set `NEXT_PUBLIC_GAME_ADDRESS`, `NEXT_PUBLIC_GAMMA_ADDRESS`, `NEXT_PUBLIC_HOOK_ADDRESS`
-   (see `frontend/.env.example`), run `pnpm build` in `frontend/`, then deploy to Vercel (user's Vercel account is
-   logged in on this machine; ask before deploying).
-4. **User**: create the project's X account.
-5. **Submit** at imdradar.site/hackathon: project X handle, a 20 to 1,000 character description, and the contract
-   address (GammaGame or the hook). Entries are public and cannot be edited.
-6. Optional: forward the launch wallet's 1% LP fee share to the Harvest (`donate`), as `PROJECT.md` promises.
+1. **Frontend to Vercel**: `frontend/` builds with no env vars (addresses are defaults in `src/lib/config.ts`;
+   `NEXT_PUBLIC_DEMO=1` switches to the simulation). The user's Vercel account is logged in; ask before deploying.
+   Set `NEXT_PUBLIC_X_URL` once the X account exists.
+2. **User**: create the project's X account.
+3. **Submit** at imdradar.site/hackathon: project X handle, a 20 to 1,000 character description, contract address
+   (GammaGame `0xb333…8535` or GAMMA `0xb307…0b44`). Public and not editable.
+4. Optional: the launch wallet earns 1% of pool trades as payer; `PROJECT.md` promises to forward it to the Harvest
+   (`donate`). Hook fees deferred on large sells can be pushed to the game by anyone with `GammaHook.redeemFees()`.
 
 ## What happened, in order
 
@@ -86,3 +76,9 @@ with it. The user has their own copy. Balance after the hook payment: ~0.02 IMD,
 - Any open medium or high finding parks a launch and the payment is lost. A parked launch cannot be retried; a new
   `launch.open` is needed.
 - Commits: conventional format, no co-author or AI mention (user's global rule).
+8. IMD registered the hook payment about 6 hours late (it was fine on chain). **Launch 2232 went live** first try:
+   token, hook and pool. The swarm reworked the hook's fee collection (sell fee reserved in `beforeSwap`, collected
+   after a full fill; deferred fees as ERC-6909 claims with `redeemFees()`; fees before genesis go to the game
+   balance and are credited by `initialize`). Merged delivered commit `f918718`.
+9. Ran `initialize` from the launch wallet: the game is live. Frontend switched to live mode by default, ABI
+   regenerated, a prerender bug in `useLiveGame` (reading `Date.now()` during render) fixed.

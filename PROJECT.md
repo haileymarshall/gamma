@@ -7,7 +7,7 @@ Win a top-5 spot in the **Identity MD (IMD) Hackathon** by shipping a working pr
 
 ## Status
 
-> **Current state and next steps: see `HANDOFF.md`** (updated 2026-10-19 08:00 UTC). The section below is the 2026-10-18 snapshot.
+> **Current state and next steps: see `HANDOFF.md`** (updated 2026-10-19 19:10 UTC). The section below is the 2026-10-18 snapshot.
 
 ### Snapshot (2026-10-18)
 
@@ -177,8 +177,8 @@ Judges reward what helps IMD itself: paid demand for the swarm and oracle (its w
 - [x] Fill `repoUrl` and `baseCommit` in `launch/*.json` (no `owner`: the payer is the owner)
 - [x] Skip `launch/00-audit.json`: every launch already runs the audit panel
 - [x] Submit `launch/01-game.json` — launch 2210 parked; relaunch 2215 live: GammaGame `0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535`
-- [x] Fill `GAME_ADDRESS` in `launch/02-hook.json` and submit it (0.5 IMD) — paid, waiting for IMD to admit it
-- [ ] Run `InitializeGame.s.sol` with the pool from the launch record
+- [x] Fill `GAME_ADDRESS` in `launch/02-hook.json` and submit it — launch 2232 live: GAMMA `0xb307…0b44`, hook `0x066f…70cc`
+- [x] Run `initialize` with the pool from launch 2232 — game live, genesis 2026-10-19 ~19:00 UTC
 - [ ] Commit to sending the paying wallet's 1% LP fee share to the Harvest (`donate`)
 - [ ] Deploy the frontend with the live env vars
 - [ ] Create the X account
