@@ -116,15 +116,12 @@ contract GammaLaunchTest is GammaFixture {
         lying.report(Currency.wrap(address(gamma)), 1);
     }
 
-    function test_imdFeeMustBeBacked() public {
+    function test_imdFeeIsRejected() public {
         (GammaGame g2, LyingHook lying,) = _lyingHookGame();
-        vm.expectRevert(GammaGame.FeeNotReceived.selector);
-        lying.report(Currency.wrap(address(imd)), 5e18);
         imd.mint(address(g2), 5e18);
-        lying.report(Currency.wrap(address(imd)), 5e18);
-        assertEq(g2.pendingImd(), 5e18);
         vm.expectRevert(GammaGame.FeeNotReceived.selector);
-        lying.report(Currency.wrap(address(imd)), 1);
+        lying.report(Currency.wrap(address(imd)), 5e18);
+        assertEq(g2.getDay(0).pot, 0);
     }
 
     function test_configuratorCannotDrainReserveThroughItsHook() public {
@@ -159,9 +156,8 @@ contract GammaLaunchTest is GammaFixture {
         gamma.approve(address(game), 5_000e18);
         game.donate(5_000e18);
         assertEq(game.gammaHeld(), gamma.balanceOf(address(game)), "donation");
-        swapExactOutBuy(bob, 50_000e18);
-        game.convertPendingImd(0);
-        assertEq(game.gammaHeld(), gamma.balanceOf(address(game)), "IMD fee converted");
+        swapExactIn(bob, false, 50_000e18);
+        assertEq(game.gammaHeld(), gamma.balanceOf(address(game)), "trading fee");
         toNextDay();
         settleAll();
         warpDays(1);
@@ -172,111 +168,10 @@ contract GammaLaunchTest is GammaFixture {
 
     // ------------------------------------------------------------------ fallback seed: commit, then read
 
-    function test_fallbackSeedCannotBeGroundPerBlock() public {
-        uint256 e = game.currentEpoch();
-        uint256 id = buy(alice, 3, 16); // Air: 90% fail
-        vm.warp(game.epochEnd(e) + 2 hours); // nobody proved the drand round for two hours
-        vm.roll(999);
-        game.settle(256, noProofs); // commits to block 999
-        assertEq(game.fallbackBlock(e), 999);
-        assertEq(game.cursor(), e);
-        assertEq(game.pendingRound(), 0, "the commitment is binding: drand no longer counts");
-        vm.setBlockhash(999, keccak256("the committed block"));
 
-        Grinder g = new Grinder();
-        uint256 first = type(uint256).max;
-        for (uint256 i; i < 40; ++i) {
-            uint256 n = 1000 + i;
-            vm.roll(n);
-            if (n - 1 != 999) vm.setBlockhash(n - 1, keccak256(abi.encode("block", n)));
-            try g.attempt(game, id, e) {}
-            catch (bytes memory reason) {
-                (uint256 s,) = abi.decode(_strip(reason), (uint256, uint8[4]));
-                if (first == type(uint256).max) first = s;
-                assertEq(s, first, "settlement outcome changes with the block the caller picks");
-            }
-        }
-        assertLt(first, type(uint256).max, "the probe ran");
 
-        // A real settlement stores the seed; it matches what every probe saw.
-        game.settle(256, noProofs);
-        assertEq(game.getBatch(id).survivors, first);
-        assertEq(game.fallbackSeed(e), keccak256(abi.encode(keccak256("the committed block"), e, "fallback")));
-        assertGt(game.cursor(), e);
-    }
 
-    function test_fallbackSeedIsOneSeedForTheWholeEpoch() public {
-        uint256 e = game.currentEpoch();
-        uint256 a = buy(alice, 0, 100);
-        uint256 b = buy(bob, 0, 100);
-        vm.warp(game.epochEnd(e) + 2 hours);
-        vm.roll(1000);
-        game.settle(1, noProofs); // commit
-        vm.roll(1001);
-        vm.setBlockhash(1000, keccak256("h"));
-        game.settle(1, noProofs); // reads the hash, stores the seed, draws the first batch
-        bytes32 seed = game.fallbackSeed(e);
-        assertTrue(game.getBatch(a).drawn);
-        assertFalse(game.getBatch(b).drawn);
 
-        vm.roll(1001 + 300); // the hash of block 1000 is gone
-        assertEq(blockhash(1000), bytes32(0));
-        game.settle(256, noProofs);
-        assertTrue(game.getBatch(b).drawn);
-        assertEq(game.fallbackSeed(e), seed, "second batch drawn under the same seed");
-        assertEq(game.getBatch(b).survivors, game.drawSurvivors(seed, b, 100, game.failBps(0)));
-    }
-
-    /// Revision finding a48fbd6d / f9624bc3: an expired fallback is renewed only a day later, never by drand.
-    function test_expiredFallbackRecommitsOnlyAfterDelay() public {
-        uint256 e = game.currentEpoch();
-        buy(alice, 2, 10);
-        vm.warp(game.epochEnd(e) + 2 hours);
-        vm.roll(1000);
-        game.settle(256, noProofs);
-        assertEq(game.fallbackBlock(e), 1000);
-        vm.roll(1300); // nobody read it for 256 blocks
-        beacon.set(game.roundForEpoch(e), keccak256("drand"));
-        game.settle(256, noProofs);
-        assertEq(game.fallbackBlock(e), 1000, "commitment is binding");
-        assertEq(game.cursor(), e, "drand is not a second option once committed");
-        assertEq(game.epochSeed(e), bytes32(0));
-        vm.warp(block.timestamp + game.FALLBACK_RECOMMIT_DELAY());
-        game.settle(256, noProofs);
-        assertEq(game.fallbackBlock(e), 1300, "renewed after the delay");
-        vm.roll(1301);
-        vm.setBlockhash(1300, keccak256("h"));
-        game.settle(256, noProofs);
-        assertGt(game.cursor(), e);
-        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("h"), e, "fallback")));
-    }
-
-    /// Revision finding f9624bc3: once committed, proving the drand round does not change the epoch's seed.
-    function test_proofAfterCommitmentDoesNotChooseSeed() public {
-        uint256 e = game.currentEpoch();
-        buy(alice, 2, 10);
-        vm.warp(game.epochEnd(e) + 2 hours);
-        vm.roll(1000);
-        game.settle(256, noProofs);
-        assertEq(game.pendingRound(), 0, "no proof is asked for once committed");
-        beacon.set(game.roundForEpoch(e), keccak256("late"));
-        vm.roll(1001);
-        vm.setBlockhash(1000, keccak256("h"));
-        game.settle(256, noProofs);
-        assertGt(game.cursor(), e);
-        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("h"), e, "fallback")));
-    }
-
-    function test_proofBeforeFallbackStillWins() public {
-        uint256 e = game.currentEpoch();
-        buy(alice, 2, 10);
-        vm.warp(game.epochEnd(e) + 2 hours);
-        beacon.set(game.roundForEpoch(e), keccak256("in time"));
-        game.settle(256, noProofs);
-        assertGt(game.cursor(), e);
-        assertEq(game.fallbackBlock(e), 0);
-        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("in time"), e)));
-    }
 
     function _strip(bytes memory r) internal pure returns (bytes memory out) {
         out = new bytes(r.length - 4);

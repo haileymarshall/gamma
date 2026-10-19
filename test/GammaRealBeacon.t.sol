@@ -119,7 +119,6 @@ contract GammaRealBeaconTest is GammaFixture {
         realGame.settle(256, proofs);
         assertEq(realBeacon.randomness(ROUND), sha256(SIGNATURE));
         assertEq(realGame.epochSeed(0), keccak256(abi.encode(sha256(SIGNATURE), uint256(0))));
-        assertEq(realGame.fallbackBlock(0), 0);
         assertTrue(realGame.getBatch(0).drawn);
         assertEq(realGame.cursor(), 1);
 

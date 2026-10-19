@@ -12,8 +12,6 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
-import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
-import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 
 import {GammaEmission} from "./libraries/GammaEmission.sol";
 import {IGammaBeacon} from "./interfaces/IGammaBeacon.sol";
@@ -52,20 +50,13 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     uint256 public constant GUARD_ENERGIES_PER_MACHINE = 2_000;
 
     /// @notice drand round used for an epoch is the first one at least this long after the epoch closes.
+    /// @dev Every epoch is seeded by drand alone. There is deliberately no block-data fallback: any fallback hands
+    /// whoever settles a choice between two public draws. A drand round can be proven at any later time, so a beacon
+    /// outage delays settlement and never changes an outcome.
     uint256 public constant BEACON_DELAY = 6;
-    /// @notice If the beacon never delivers, settlement falls back to block data after this long so funds never freeze.
-    uint256 public constant BEACON_FALLBACK = 2 hours;
-    /// @notice A fallback commitment whose block hash expired unread may be renewed only this long after it was made.
-    uint256 public constant FALLBACK_RECOMMIT_DELAY = 1 days;
 
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
     uint256 internal constant INDEX_SCALE = 1e36;
-    /// @dev convertPendingImd may move sqrtPrice at most 1% (price ~2%) past the reference price.
-    uint256 public constant CONVERT_SQRT_TOLERANCE_BPS = 100;
-    /// @dev The reference sqrtPrice follows the pool at most this fast (bps per minute) ...
-    uint256 public constant REF_RATE_BPS_PER_MINUTE = 100;
-    /// @dev ... and at most this far in one observation, however long the pool was quiet before it.
-    uint256 public constant REF_MAX_STEP_BPS = 200;
 
     // ------------------------------------------------------------------ immutables
 
@@ -133,26 +124,11 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     uint256 public totalUnclaimed;
     uint256 public bonusIndex;
 
-    /// @notice IMD fees from exact-output buys, waiting to be swapped into today's Harvest.
-    uint256 public pendingImd;
-
     uint256 public totalBurned;
     uint256 public totalEnergies;
 
     /// @notice GAMMA the game has accounted for. A hook fee is only credited once the tokens are really here.
     uint256 public gammaHeld;
-
-    /// @notice Fallback seeding, per epoch: the block committed to, and the seed once that block's hash was read.
-    /// Committing first and reading later means no settler can pick the block that seeds an epoch.
-    mapping(uint256 => uint256) public fallbackBlock;
-    mapping(uint256 => bytes32) public fallbackSeed;
-    mapping(uint256 => uint256) public fallbackAt;
-
-    /// @notice Rate-limited reference sqrtPrice for convertPendingImd and the time it last moved. It follows the
-    /// pool's observed price by at most REF_RATE_BPS_PER_MINUTE, so moving it far takes holding a price for a long
-    /// time, not one block's trade.
-    uint160 public refPrice;
-    uint64 public refTime;
 
     // ------------------------------------------------------------------ events and errors
 
@@ -165,7 +141,6 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     event Harvest(uint256 indexed day, uint256 pot, uint256 fails, uint256 perFail);
     event Claimed(address indexed owner, uint256 winnings, uint256 fee, uint256 bonus, uint256 paid);
     event HarvestFunded(uint256 indexed day, uint256 amount, uint8 source);
-    event FallbackCommitted(uint256 indexed epoch, uint256 blockNumber);
 
     error NotConfigurator();
     error FeeNotReceived();
@@ -252,8 +227,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
 
         uint256 gammaNeeded = energies * ENERGY_COST;
         imd.safeTransferFrom(msg.sender, address(this), maxImdIn);
-        uint256 imdSpent =
-            abi.decode(poolManager.unlock(abi.encode(false, gammaNeeded, maxImdIn, uint160(0))), (uint256));
+        uint256 imdSpent = abi.decode(poolManager.unlock(abi.encode(gammaNeeded, maxImdIn)), (uint256));
         if (imdSpent > maxImdIn) revert SlippageExceeded();
         if (maxImdIn > imdSpent) imd.safeTransfer(msg.sender, maxImdIn - imdSpent);
 
@@ -306,73 +280,42 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         _fund(today(), amount, SOURCE_DONATION);
     }
 
-    /// @notice Swaps IMD trading fees into GAMMA for today's Harvest. Anyone can call.
-    function convertPendingImd(uint256 minGammaOut) external nonReentrant {
-        uint256 amount = pendingImd;
-        if (amount == 0) return;
-        // Reference: the rate-limited price, which a caller cannot move far with a pump of one block or a few.
-        _observe();
-        uint160 ref = refPrice;
-        uint256 limit = _gammaIs0
-            ? uint256(ref) * (BPS + CONVERT_SQRT_TOLERANCE_BPS) / BPS
-            : uint256(ref) * (BPS - CONVERT_SQRT_TOLERANCE_BPS) / BPS;
-        (uint160 price,,,) = StateLibrary.getSlot0(poolManager, PoolIdLibrary.toId(_poolKey));
-        if (_gammaIs0 ? price >= limit : price <= limit) return; // price already pushed past the bound
-        (uint256 out, uint256 imdIn) =
-            abi.decode(poolManager.unlock(abi.encode(true, amount, minGammaOut, uint160(limit))), (uint256, uint256));
-        pendingImd = amount - imdIn; // a partial fill keeps the rest for a later conversion
-        gammaHeld += out;
-        _fund(today(), out, SOURCE_TRADING);
-    }
-
     /// @inheritdoc IGammaGame
-    /// @dev Only tokens that actually arrived are credited: the hook's word alone never moves the Harvest.
+    /// @dev Only GAMMA that actually arrived is credited: the hook's word alone never moves the Harvest. The hook
+    /// takes every fee in GAMMA (it refuses the one swap shape that would pay in IMD), so the game never has to
+    /// swap fees and nothing it holds can be sandwiched.
     function onHookFee(Currency currency, uint256 amount) external nonReentrant {
         if (msg.sender != hook) revert NotHook();
-        _observe();
-        if (Currency.unwrap(currency) == address(gamma)) {
-            if (gamma.balanceOf(address(this)) < gammaHeld + amount) revert FeeNotReceived();
-            gammaHeld += amount;
-            _fund(today(), amount, SOURCE_TRADING);
-        } else {
-            if (imd.balanceOf(address(this)) < pendingImd + amount) revert FeeNotReceived();
-            pendingImd += amount;
-        }
+        if (Currency.unwrap(currency) != address(gamma)) revert FeeNotReceived();
+        if (gamma.balanceOf(address(this)) < gammaHeld + amount) revert FeeNotReceived();
+        gammaHeld += amount;
+        _fund(today(), amount, SOURCE_TRADING);
     }
 
     // ------------------------------------------------------------------ pool
 
-    /// @dev data = (exactInImd, amount, limit). exactInImd=false: buy exactly `amount` GAMMA for at most `limit` IMD.
-    /// exactInImd=true: sell exactly `amount` IMD for at least `limit` GAMMA. Returns the IMD spent or GAMMA bought.
+    /// @dev data = (amount, limit): buy exactly `amount` GAMMA for at most `limit` IMD. Returns the IMD spent.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
-        (bool exactInImd, uint256 amount, uint256 limit, uint160 priceLimit) =
-            abi.decode(data, (bool, uint256, uint256, uint160));
+        (uint256 amount, uint256 limit) = abi.decode(data, (uint256, uint256));
 
         bool zeroForOne = !_gammaIs0; // IMD in, GAMMA out
         BalanceDelta delta = poolManager.swap(
             _poolKey,
             SwapParams({
                 zeroForOne: zeroForOne,
-                amountSpecified: exactInImd ? -int256(amount) : int256(amount),
-                sqrtPriceLimitX96: priceLimit != 0
-                    ? priceLimit
-                    : (zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1)
+                amountSpecified: int256(amount),
+                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
             }),
             ""
         );
-        _observe();
 
         (int128 imdDelta, int128 gammaDelta) =
             _gammaIs0 ? (delta.amount1(), delta.amount0()) : (delta.amount0(), delta.amount1());
         uint256 imdIn = uint256(uint128(-imdDelta));
         uint256 gammaOut = uint256(uint128(gammaDelta));
 
-        if (exactInImd) {
-            if (gammaOut < limit) revert SlippageExceeded();
-        } else {
-            if (gammaOut != amount || imdIn > limit) revert SlippageExceeded();
-        }
+        if (gammaOut != amount || imdIn > limit) revert SlippageExceeded();
 
         Currency imdC = Currency.wrap(address(imd));
         poolManager.sync(imdC);
@@ -380,27 +323,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         poolManager.settle();
         poolManager.take(Currency.wrap(address(gamma)), address(this), gammaOut);
 
-        return exactInImd ? abi.encode(gammaOut, imdIn) : abi.encode(imdIn);
-    }
-
-    /// @dev Moves the reference toward the pool's current price, at most REF_RATE_BPS_PER_MINUTE of elapsed time
-    /// and REF_MAX_STEP_BPS per observation. It moves at most once per timestamp, so repeated observations in a
-    /// block (or before a swap moves the price) cannot push it further.
-    function _observe() internal {
-        (uint160 price,,,) = StateLibrary.getSlot0(poolManager, PoolIdLibrary.toId(_poolKey));
-        uint256 ref = refPrice;
-        if (ref == 0) {
-            refPrice = price;
-            refTime = uint64(block.timestamp);
-            return;
-        }
-        uint256 dt = block.timestamp - refTime;
-        if (dt == 0) return;
-        refTime = uint64(block.timestamp);
-        uint256 step = _min(dt * REF_RATE_BPS_PER_MINUTE / 60, REF_MAX_STEP_BPS);
-        uint256 hi = ref * (BPS + step) / BPS;
-        uint256 lo = ref * (BPS - step) / BPS;
-        refPrice = uint160(price > hi ? hi : price < lo ? lo : price);
+        return abi.encode(imdIn);
     }
 
     // ------------------------------------------------------------------ settlement
@@ -439,17 +362,8 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
                 continue;
             }
 
-            (bytes32 seed, bool commit) = _seed(e);
-            if (seed == bytes32(0)) {
-                if (commit) {
-                    // Nobody chose this block's hash: it is read, and fixed for the epoch, from the next block on.
-                    fallbackBlock[e] = block.number;
-                    fallbackAt[e] = block.timestamp;
-                    emit FallbackCommitted(e, block.number);
-                }
-                break;
-            }
-            if (commit && fallbackSeed[e] == bytes32(0)) fallbackSeed[e] = seed;
+            bytes32 seed = epochSeed(e);
+            if (seed == bytes32(0)) break; // waiting for the epoch's drand round to be proven
 
             Epoch storage ep = _epochs[e];
             uint256[] storage list = _epochBatches[e];
@@ -664,43 +578,17 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         return uint64((t - g + p - 1) / p + 1);
     }
 
-    /// @notice Seed of epoch `e`, or zero while none is available yet. From drand when its round is proven before
-    /// the fallback is committed; otherwise from the hash of the block settlement committed to, which is fixed
-    /// for the epoch the first time it is read.
+    /// @notice Seed of epoch `e`, or zero until its drand round is proven on-chain.
     function epochSeed(uint256 e) public view returns (bytes32) {
-        (bytes32 seed,) = _seed(e);
-        return seed;
-    }
-
-    /// @return seed The epoch's seed, or zero while none is available.
-    /// @return viaFallback With a seed: it came from the fallback and is to be stored. Without one: settlement
-    /// should commit to the current block (the fallback window is open and no readable commitment exists).
-    function _seed(uint256 e) internal view returns (bytes32 seed, bool viaFallback) {
-        seed = fallbackSeed[e];
-        if (seed != bytes32(0)) return (seed, true);
-
-        uint256 committed = fallbackBlock[e];
-        if (committed == 0) {
-            // Before any commitment a proven drand round seeds the epoch.
-            bytes32 r = beacon.randomness(roundForEpoch(e));
-            if (r != bytes32(0)) return (keccak256(abi.encode(r, e)), false);
-            return (bytes32(0), block.timestamp >= epochEnd(e) + BEACON_FALLBACK);
-        }
-        // Once committed, the commitment is binding: drand is ignored for this epoch, so no settler can hold two
-        // usable seeds and pick one.
-        if (block.number <= committed) return (bytes32(0), false); // committed in this block: wait for its hash
-        bytes32 h = blockhash(committed);
-        // Unread for 256 blocks, the hash is gone. Renewing is allowed only a day after the commitment, so letting
-        // a known draw expire costs a day of nobody else settling, and the new draw is unknown when it is made.
-        if (h == bytes32(0)) return (bytes32(0), block.timestamp >= fallbackAt[e] + FALLBACK_RECOMMIT_DELAY);
-        return (keccak256(abi.encode(h, e, "fallback")), true);
+        bytes32 r = beacon.randomness(roundForEpoch(e));
+        return r == bytes32(0) ? bytes32(0) : keccak256(abi.encode(r, e));
     }
 
     /// @notice The drand round settlement is waiting on, or 0 if none.
     function pendingRound() external view returns (uint64) {
         uint256 e = cursor;
         if (genesis == 0 || e >= currentEpoch() || activeCursor >= activeEpochs.length) return 0;
-        if (activeEpochs[activeCursor] != e || fallbackBlock[e] != 0) return 0;
+        if (activeEpochs[activeCursor] != e) return 0;
         uint64 round = roundForEpoch(e);
         return beacon.randomness(round) == bytes32(0) ? round : 0;
     }

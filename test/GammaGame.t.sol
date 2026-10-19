@@ -122,19 +122,22 @@ contract GammaGameTest is GammaFixture {
         assertGt(game.cursor(), e, "the purchase settled the previous epoch");
     }
 
-    function test_fallbackSeedAfterTwoHours() public {
+    function test_noFallbackSeedOnlyDrand() public {
         buy(alice, 0, 50);
         uint256 e = game.currentEpoch();
-        vm.warp(game.epochEnd(e) + 2 hours);
-        // The first call commits to the block it runs in; the seed is read from its hash in a later block.
+        // However long drand is missing, block data never seeds the epoch: settlement waits.
+        vm.warp(game.epochEnd(e) + 30 days);
+        vm.roll(block.number + 10_000);
         game.settle(256, noProofs);
-        assertEq(game.cursor(), e, "committed, not yet seeded");
-        assertEq(game.fallbackBlock(e), block.number);
+        assertEq(game.cursor(), e, "still waiting for drand");
         assertEq(game.epochSeed(e), bytes32(0));
-        vm.roll(block.number + 1);
+        assertEq(game.pendingRound(), game.roundForEpoch(e));
+        // The round proven late seeds the epoch exactly as it would have on time.
+        bytes32 r = keccak256("late round");
+        beacon.set(game.roundForEpoch(e), r);
         game.settle(256, noProofs);
         assertGt(game.cursor(), e);
-        assertEq(game.fallbackSeed(e), keccak256(abi.encode(blockhash(block.number - 1), e, "fallback")));
+        assertEq(game.epochSeed(e), keccak256(abi.encode(r, e)));
     }
 
     function test_roundForEpochIsAfterClose() public view {

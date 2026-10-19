@@ -15,8 +15,8 @@ import {IGammaGame} from "./interfaces/IGammaGame.sol";
 /// @title GammaHook
 /// @notice Uniswap v4 hook for the GAMMA/IMD pool. Every trade pays a fee that starts at 99% at launch and falls
 /// one point per minute to 3% forever (from minute 96). 100% of it goes to today's Harvest: snipers and traders
-/// pay the miners. The fee is taken in GAMMA wherever the swap shape allows, in IMD otherwise (exact-output buys),
-/// which the game swaps into GAMMA. The game's own purchases are exempt. No owner.
+/// pay the miners. Every fee is taken in GAMMA: exact-output buys, the one shape that would pay in IMD, are refused
+/// (buy with an exact IMD input instead). The game's own purchases are exempt. No owner.
 contract GammaHook is IHooks {
     uint256 public constant BPS = 10_000;
     uint256 public constant START_FEE_BPS = 9_900;
@@ -38,6 +38,7 @@ contract GammaHook is IHooks {
     error PoolAlreadySet();
     error NotImdPair();
     error HookNotImplemented();
+    error ExactOutputBuyNotSupported();
 
     constructor(IPoolManager poolManager_, address imd_, IGammaGame game_) {
         poolManager = poolManager_;
@@ -104,8 +105,11 @@ contract GammaHook is IHooks {
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
+        if (sender == address(game)) return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        // Exact-output buys would pay the fee in IMD; refuse them so the Harvest only ever receives GAMMA.
+        if (params.amountSpecified > 0 && !_inputIsGamma(params)) revert ExactOutputBuyNotSupported();
         // Exact-input sells: take the fee from the GAMMA going in, before it is swapped.
-        if (sender != address(game) && params.amountSpecified < 0 && _inputIsGamma(params)) {
+        if (params.amountSpecified < 0 && _inputIsGamma(params)) {
             uint256 fee = uint256(-params.amountSpecified) * feeBps() / BPS;
             if (fee > 0) {
                 _collect(gamma, fee);
@@ -128,7 +132,7 @@ contract GammaHook is IHooks {
         bool exactIn = params.amountSpecified < 0;
         if (exactIn && _inputIsGamma(params)) return (IHooks.afterSwap.selector, 0); // charged in beforeSwap
 
-        // Unspecified side: the output of an exact-input buy (GAMMA), or the input of an exact-output swap.
+        // Unspecified side, always GAMMA: the output of an exact-input buy, or the input of an exact-output sell.
         bool specifiedIs0 = exactIn == params.zeroForOne;
         (Currency feeCurrency, int128 amount) =
             specifiedIs0 ? (key.currency1, delta.amount1()) : (key.currency0, delta.amount0());

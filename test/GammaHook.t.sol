@@ -7,6 +7,9 @@ import {GammaHook} from "src/GammaHook.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {PoolSwapTest} from "v4-core/src/test/PoolSwapTest.sol";
 
 contract GammaHookTest is GammaFixture {
     function setUp() public override {
@@ -65,19 +68,25 @@ contract GammaHookTest is GammaFixture {
         assertEq(fee, 100_000e18 * 300 / 10_000, "3% of the GAMMA sent");
     }
 
-    function test_exactOutBuyFeeInImdThenConverted() public {
-        swapExactOutBuy(bob, 50_000e18);
-        assertEq(gamma.balanceOf(bob), 50_000e18, "got exactly what was asked");
-        uint256 pending = game.pendingImd();
-        assertGt(pending, 0);
-        assertEq(imd.balanceOf(address(game)), pending);
-
-        uint256 d = game.today();
-        uint256 potBefore = game.getDay(d).pot;
-        game.convertPendingImd(0); // the buy moved the price within the reference's tolerance
-        assertEq(game.pendingImd(), 0);
-        assertEq(imd.balanceOf(address(game)), 0);
-        assertGt(game.getDay(d).pot, potBefore);
+    function test_exactOutBuyIsRejected() public {
+        uint256 bobGamma = gamma.balanceOf(bob);
+        vm.startPrank(bob);
+        imd.approve(address(swapRouter), type(uint256).max);
+        bool zeroForOne = !gammaIs0;
+        vm.expectRevert();
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: int256(50_000e18),
+                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+        vm.stopPrank();
+        assertEq(gamma.balanceOf(bob), bobGamma);
+        assertEq(imd.balanceOf(address(game)), 0, "no IMD fee can reach the game");
     }
 
     function test_gamePurchasesAreExempt() public {
@@ -86,7 +95,7 @@ contract GammaHookTest is GammaFixture {
         uint256 potBefore = game.getDay(d).pot;
         buy(bob, 0, 50);
         assertEq(game.getDay(d).pot, potBefore, "no hook fee on energy purchases");
-        assertEq(game.pendingImd(), 0);
+        assertEq(imd.balanceOf(address(game)), 0);
     }
 
     function test_tradingFeesReachMiners() public {

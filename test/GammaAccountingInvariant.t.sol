@@ -100,17 +100,18 @@ contract GammaAccountingHandler is Test {
         }
     }
 
-    /// @dev Covers buys in both exact-input and exact-output forms, and exact-input sells.
+    /// @dev Covers exact-input buys, exact-input sells and exact-output sells. Exact-output buys are refused by
+    /// the hook (they would pay the fee in IMD), see GammaHookTest.test_exactOutBuyIsRejected.
     function trade(uint256 who, uint256 amount, uint8 modeSeed) external cursorMonotonic {
         address actor = actors[who % 3];
         uint8 mode = modeSeed % 3;
-        bool sell = mode == 2;
+        bool sell = mode != 0;
         ERC20 tokenIn = sell ? ERC20(address(gamma)) : ERC20(address(imd));
         uint256 max = tokenIn.balanceOf(actor);
-        if (mode == 1) max /= 2; // exact-output buy: leave ample IMD for LP fee and price impact
         if (max > 5_000e18) max = 5_000e18;
         if (max < 1e18) return;
-        amount = bound(amount, 1e18, max);
+        // Exact-output sell: ask for a little IMD so the GAMMA it costs stays within the actor's balance.
+        amount = mode == 1 ? bound(amount, 1e15, 1e17) : bound(amount, 1e18, max);
         uint256 potBefore = game.getDay(game.today()).pot;
         bool zeroForOne = sell == (address(gamma) < address(imd));
         vm.startPrank(actor);
@@ -129,25 +130,6 @@ contract GammaAccountingHandler is Test {
         inflows += game.getDay(game.today()).pot - potBefore;
     }
 
-    /// @dev Conversion may legitimately do nothing (no earlier-block price, price already past the bound) or
-    /// fill partially at the price bound; whatever IMD it consumes must come back as Harvest GAMMA.
-    function convert() external cursorMonotonic {
-        uint256 pending = game.pendingImd();
-        uint256 potBefore = game.getDay(game.today()).pot;
-        uint256 imdBefore = imd.balanceOf(address(game));
-        game.convertPendingImd(0);
-        uint256 credited = game.getDay(game.today()).pot - potBefore;
-        inflows += credited;
-        uint256 left = game.pendingImd();
-        assertLe(left, pending, "conversion increased pending IMD");
-        assertEq(imdBefore - imd.balanceOf(address(game)), pending - left, "IMD left without pending debit");
-        if (left < pending) {
-            assertGt(credited, 0, "IMD swapped for no GAMMA");
-            ++conversions;
-        } else {
-            assertEq(credited, 0, "GAMMA credited without spending IMD");
-        }
-    }
 
     function advance(uint256 secondsSeed, uint256 blocksSeed) external cursorMonotonic {
         vm.warp(vm.getBlockTimestamp() + bound(secondsSeed, 1, 30 hours));
@@ -189,22 +171,9 @@ contract GammaAccountingHandler is Test {
     function finish() external {
         vm.warp(game.dayEnd(game.today()) + 1 days);
         _proveClosed();
-        // A commitment may have been left by the last random call; make its hash readable.
-        uint256 previous = vm.getBlockNumber();
-        vm.roll(previous + 1);
-        vm.setBlockhash(previous, keccak256(abi.encode(previous, "finish")));
         for (uint256 i; i < 8; ++i) {
-            uint256 beforeCursor = game.cursor();
             game.settle(256, none);
             if (game.cursor() == game.currentEpoch()) break;
-            if (game.cursor() == beforeCursor) {
-                uint256 committed = game.fallbackBlock(game.cursor());
-                if (committed != 0) {
-                    uint256 next = vm.getBlockNumber() + 1;
-                    vm.roll(next);
-                    if (next - committed <= 256) vm.setBlockhash(committed, keccak256(abi.encode(committed)));
-                }
-            }
         }
         assertEq(game.cursor(), game.currentEpoch(), "settlement cannot catch up");
         for (uint256 i; i < 3; ++i) {
@@ -256,15 +225,14 @@ contract GammaAccountingInvariantTest is GammaFixture {
         settleAll();
         accounting = new GammaAccountingHandler(game, beacon, gamma, imd, swapRouter, key, [alice, bob, carol]);
         gamma.transfer(address(accounting), 1_000_000e18);
-        bytes4[] memory selectors = new bytes4[](8);
+        bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = accounting.buy.selector;
         selectors[1] = accounting.donate.selector;
         selectors[2] = accounting.trade.selector;
-        selectors[3] = accounting.convert.selector;
-        selectors[4] = accounting.advance.selector;
-        selectors[5] = accounting.settle.selector;
-        selectors[6] = accounting.claim.selector;
-        selectors[7] = accounting.rejectForeignClaim.selector;
+        selectors[3] = accounting.advance.selector;
+        selectors[4] = accounting.settle.selector;
+        selectors[5] = accounting.claim.selector;
+        selectors[6] = accounting.rejectForeignClaim.selector;
         targetContract(address(accounting));
         targetSelector(FuzzSelector({addr: address(accounting), selectors: selectors}));
     }
@@ -278,7 +246,7 @@ contract GammaAccountingInvariantTest is GammaFixture {
         assertEq(game.totalEnergies(), accounting.energies());
         assertEq(game.totalBurned(), accounting.energies() * 1_000e18 + accounting.claimBurns());
         assertEq(gamma.balanceOf(game.DEAD()), game.totalBurned());
-        assertEq(imd.balanceOf(address(game)), game.pendingImd(), "unbacked or stranded IMD fees");
+        assertEq(imd.balanceOf(address(game)), 0, "the game never keeps IMD");
     }
 
     /// @dev Includes accrued bonuses, which totalUnclaimed alone does not represent.

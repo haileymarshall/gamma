@@ -102,34 +102,6 @@ contract GammaFailurePathsTest is GammaFixture {
         assertEq(game.gammaHeld(), heldBefore);
     }
 
-    function test_failedConversionRestoresPendingImdAndCanBeRetried() public {
-        swapExactOutBuy(bob, 50_000e18);
-        uint256 pendingBefore = game.pendingImd();
-        uint256 gammaBefore = gamma.balanceOf(address(game));
-        uint256 potBefore = game.getDay(game.today()).pot;
-        assertGt(pendingBefore, 0);
-        // Conversion needs a price fixed in an earlier block.
-        vm.roll(block.number + 1);
-
-        vm.expectRevert(GammaGame.SlippageExceeded.selector);
-        game.convertPendingImd(type(uint256).max);
-        assertEq(game.pendingImd(), pendingBefore);
-        assertEq(imd.balanceOf(address(game)), pendingBefore);
-        assertEq(gamma.balanceOf(address(game)), gammaBefore);
-        assertEq(game.getDay(game.today()).pot, potBefore);
-
-        vm.prank(carol);
-        game.convertPendingImd(0);
-        uint256 out = gamma.balanceOf(address(game)) - gammaBefore;
-        assertGt(out, 0);
-        assertEq(game.pendingImd(), 0);
-        assertEq(imd.balanceOf(address(game)), 0);
-        assertEq(game.getDay(game.today()).pot - potBefore, out);
-        assertEq(game.gammaHeld(), gamma.balanceOf(address(game)));
-        // With nothing pending even an impossible minimum has no effect.
-        game.convertPendingImd(type(uint256).max);
-        assertEq(gamma.balanceOf(address(game)), gammaBefore + out);
-    }
 
     function test_claimArrayWithForeignBatchRevertsEveryEarlierClaim() public {
         uint256 a = buy(alice, 3, 100);

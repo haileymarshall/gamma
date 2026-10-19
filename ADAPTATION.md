@@ -198,3 +198,35 @@ Advisory findings left unchanged: `5f3b7fff` (off-chain drand knowledge with a l
 stays 6 s, changing it moves every epoch's round), `b447e15e` (claim fee measured from the day's end, documented),
 `a5ae147a` (configurator's one-shot initialize is a trust assumption), `6385a04e` (hook must be created with its
 pool in one transaction; the hook is not in this manifest), `9f981c3e` (wei-level rounding dust).
+
+## Requester revision after launch 2210 was parked
+
+Launch 2210 was parked on two medium findings that the revisions above narrowed but could not close, because both
+came from mechanisms that cannot be made choice-free: a swap of fee IMD at a price someone can lean on, and a
+block-data fallback beside a public drand draw. Both mechanisms are removed rather than patched again. Changes 3, 5,
+6 and 9 are superseded.
+
+### 10. No IMD fees, so no fee swap (closes `9ea7101d…`, `250bf221…`, `deb689d5…`)
+- `src/GammaHook.sol`: `beforeSwap` reverts `ExactOutputBuyNotSupported` for an exact-output buy (output GAMMA,
+  `amountSpecified > 0`) from anyone but the game. That is the only swap shape whose fee falls on IMD; every other
+  shape is charged in GAMMA exactly as before (exact-input sells in `beforeSwap`, exact-input buys and exact-output
+  sells in `afterSwap`). Buyers use an exact IMD input. The game's own exact-output purchases stay exempt.
+- `src/GammaGame.sol`: `pendingImd`, `convertPendingImd`, the reference price (`refPrice`, `refTime`, `_observe`)
+  and their constants are removed. `onHookFee` reverts `FeeNotReceived` for any currency other than GAMMA. The game
+  never holds IMD between calls, so nothing it holds can be sandwiched. `unlockCallback` only performs the game's
+  exact-output purchase.
+
+### 11. drand only, no block-data fallback (closes `f9624bc3…`, `aead30a2…`, `a48fbd6d…`)
+- `src/GammaGame.sol`: `epochSeed(e)` is `keccak256(drand randomness of roundForEpoch(e), e)`, or zero until that
+  round is proven. `BEACON_FALLBACK`, `FALLBACK_RECOMMIT_DELAY`, `fallbackBlock`, `fallbackSeed`, `fallbackAt` and
+  `FallbackCommitted` are removed. With no second source there is no draw for a settler to choose.
+- Liveness: a drand round is a BLS signature that anyone can prove on-chain at any later time (`DrandBeacon.prove` is
+  permissionless), so an outage delays settlement and never changes an outcome. The remaining trust assumption is
+  that drand evmnet keeps publishing, the same kind of external dependency as an oracle.
+- `EpochSeedKnown` (change 7) is unchanged.
+
+Tests: `GammaHookTest.test_exactOutBuyIsRejected`, `GammaLaunchTest.test_imdFeeIsRejected`,
+`GammaGameTest.test_noFallbackSeedOnlyDrand` (30 days and 10,000 blocks without drand: the epoch waits, then a late
+proof seeds it exactly as on time). The accounting invariant now asserts the game never keeps IMD, and its trade
+handler covers exact-input buys, exact-input sells and exact-output sells. The tests of the removed mechanisms are
+removed. `forge test`: 106 passed.
