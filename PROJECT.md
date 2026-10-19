@@ -160,6 +160,9 @@ Judges reward what helps IMD itself: paid demand for the swarm and oracle (its w
   - Bought 1.02 IMD on the IMD/ETH v4 pool through a self-deployed `PoolSwapTest` router (`0x0a8c…268B`).
   - Paid `01-game.json` (tx `0xea4f…4558`), IMD job `137fee05-7413-46fb-b03b-45db0221ea93`.
   - The prize "deployer" on the radar is IMD's factory for every IMD launch; IMD records the paying wallet onchain.
+  - Launch 2210 (job `137fee05…`) was **parked, not deployed**: after 3 fix rounds two medium findings remained (IMD-fee swap price could be leaned on; block-hash fallback gave the settler a choice of draws). 0.5 IMD spent.
+  - Merged the swarm's audited fixes, then removed both mechanisms: the hook refuses exact-output buys so fees are GAMMA-only, and seeding is drand-only with no fallback. 106 tests pass. Commit `baf28a8`.
+  - Relaunch paid (tx `0xefc7…7bc3`), job `a95d8284-6bc6-479d-ac62-7e115d14a150`. Wallet has ~0.02 IMD left: the hook launch needs ~0.5 IMD more.
 
 ## Submission checklist
 - [x] Pick name + idea (GAMMA)
