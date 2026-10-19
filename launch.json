@@ -1,0 +1,19 @@
+{
+  "kind": "evm_contracts",
+  "contracts": [
+    {
+      "contract": "DrandBeacon",
+      "constructorArgs": []
+    },
+    {
+      "contract": "GammaGame",
+      "constructorArgs": [
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127",
+        "$contract:DrandBeacon",
+        "$owner"
+      ]
+    }
+  ],
+  "notes": "DrandBeacon permissionlessly verifies drand evmnet BLS signatures on BN254. GammaGame uses the specified pool manager and IMD addresses and the deployed beacon for the GAMMA proof-of-play game. Its fixed 800M GAMMA reserve is released in 10-minute epochs; survivors share Shares and failures share the evening Harvest. Claim fees fall from 80% to 10% over 24 hours and are split among burning, unclaimed bonuses and Harvest. GammaGame deploys uninitialized; $owner is its one-time configurator."
+}
