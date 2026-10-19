@@ -70,10 +70,13 @@ contract GammaHook is IHooks {
         });
     }
 
-    /// @notice Current trading fee: 99% at launch, -1 point per minute, 3% from minute 96.
+    /// @notice Current trading fee: 99% at launch (counted from the game's genesis), -1 point per minute, 3% from minute 96.
     function feeBps() public view returns (uint256) {
-        if (launchedAt == 0) return START_FEE_BPS;
-        uint256 decay = (block.timestamp - launchedAt) / 60 * DECAY_BPS_PER_MINUTE;
+        // The decay starts when trading can start: the later of pool creation and the game's genesis.
+        uint256 start = game.genesis();
+        if (launchedAt == 0 || start == 0) return START_FEE_BPS;
+        if (launchedAt > start) start = launchedAt;
+        uint256 decay = (block.timestamp - start) / 60 * DECAY_BPS_PER_MINUTE;
         if (decay >= START_FEE_BPS - FLOOR_FEE_BPS) return FLOOR_FEE_BPS;
         return START_FEE_BPS - decay;
     }
@@ -113,11 +116,13 @@ contract GammaHook is IHooks {
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
-    function afterSwap(address sender, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta, bytes calldata)
-        external
-        onlyPoolManager
-        returns (bytes4, int128)
-    {
+    function afterSwap(
+        address sender,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        BalanceDelta delta,
+        bytes calldata
+    ) external onlyPoolManager returns (bytes4, int128) {
         if (sender == address(game)) return (IHooks.afterSwap.selector, 0);
 
         bool exactIn = params.amountSpecified < 0;

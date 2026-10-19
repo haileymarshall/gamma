@@ -180,7 +180,7 @@ contract GammaLaunchTest is GammaFixture {
         game.settle(256, noProofs); // commits to block 999
         assertEq(game.fallbackBlock(e), 999);
         assertEq(game.cursor(), e);
-        assertEq(game.pendingRound(), 0, "settlement no longer waits for drand");
+        assertEq(game.pendingRound(), game.roundForEpoch(e), "a drand proof is still asked for: it would win");
         vm.setBlockhash(999, keccak256("the committed block"));
 
         Grinder g = new Grinder();
@@ -227,7 +227,8 @@ contract GammaLaunchTest is GammaFixture {
         assertEq(game.getBatch(b).survivors, game.drawSurvivors(seed, b, 100, game.failBps(0)));
     }
 
-    function test_fallbackRecommitsWhenTheHashExpired() public {
+    /// Revision finding a48fbd6d: re-committing an expired fallback let a lone settler re-roll the seed.
+    function test_expiredFallbackIsNeverRecommitted() public {
         uint256 e = game.currentEpoch();
         buy(alice, 2, 10);
         vm.warp(game.epochEnd(e) + 2 hours);
@@ -236,26 +237,30 @@ contract GammaLaunchTest is GammaFixture {
         assertEq(game.fallbackBlock(e), 1000);
         vm.roll(1300); // nobody read it for 256 blocks
         game.settle(256, noProofs);
-        assertEq(game.fallbackBlock(e), 1300, "committed again");
+        assertEq(game.fallbackBlock(e), 1000, "commitment is binding");
         assertEq(game.cursor(), e);
         vm.roll(1301);
         game.settle(256, noProofs);
+        assertEq(game.cursor(), e, "waits for drand");
+        beacon.set(game.roundForEpoch(e), keccak256("drand"));
+        game.settle(256, noProofs);
         assertGt(game.cursor(), e);
+        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("drand"), e)));
     }
 
-    function test_lateProofDoesNotReplaceCommittedFallback() public {
+    /// Revision finding a48fbd6d: a proven drand round wins over a fallback that has not been read yet.
+    function test_proofWinsOverUnreadFallback() public {
         uint256 e = game.currentEpoch();
         buy(alice, 2, 10);
         vm.warp(game.epochEnd(e) + 2 hours);
         vm.roll(1000);
         game.settle(256, noProofs);
-        // Once committed, the fallback is the epoch's seed: a proof that arrives now gives nobody a second option.
         beacon.set(game.roundForEpoch(e), keccak256("late"));
         vm.roll(1001);
         game.settle(256, noProofs);
         assertGt(game.cursor(), e);
-        assertEq(game.fallbackSeed(e), keccak256(abi.encode(blockhash(1000), e, "fallback")));
-        assertTrue(game.epochSeed(e) != keccak256(abi.encode(keccak256("late"), e)));
+        assertEq(game.fallbackSeed(e), bytes32(0));
+        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("late"), e)));
     }
 
     function test_proofBeforeFallbackStillWins() public {

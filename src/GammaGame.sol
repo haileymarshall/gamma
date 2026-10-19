@@ -12,6 +12,8 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 
 import {GammaEmission} from "./libraries/GammaEmission.sol";
 import {IGammaBeacon} from "./interfaces/IGammaBeacon.sol";
@@ -56,6 +58,8 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
 
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
     uint256 internal constant INDEX_SCALE = 1e36;
+    /// @dev convertPendingImd may move sqrtPrice at most 1% (price ~2%) from the last price of an earlier block.
+    uint256 public constant CONVERT_SQRT_TOLERANCE_BPS = 100;
 
     // ------------------------------------------------------------------ immutables
 
@@ -137,6 +141,12 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     mapping(uint256 => uint256) public fallbackBlock;
     mapping(uint256 => bytes32) public fallbackSeed;
 
+    /// @notice Pool price observations: the last price seen in block `obsBlock`, and the last price of the
+    /// observed block before it. convertPendingImd swaps only near a price fixed in an earlier block.
+    uint160 public obsPrice;
+    uint160 public prevObsPrice;
+    uint64 public obsBlock;
+
     // ------------------------------------------------------------------ events and errors
 
     event Initialized(address gamma, address hook, uint64 genesis);
@@ -163,6 +173,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     error NotHook();
     error NotOwner();
     error SlippageExceeded();
+    error EpochSeedKnown();
 
     uint8 internal constant SOURCE_TRADING = 0;
     uint8 internal constant SOURCE_DONATION = 1;
@@ -225,6 +236,8 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         _settle(AUTO_SETTLE_UNITS);
 
         uint256 e = currentEpoch();
+        // A purchase into an epoch whose seed is already on-chain would let the buyer pick a known draw.
+        if (beacon.randomness(roundForEpoch(e)) != bytes32(0)) revert EpochSeedKnown();
         Epoch storage ep = _epochs[e];
         if (block.timestamp < genesis + GUARD_PERIOD && ep.energies[machine] + energies > GUARD_ENERGIES_PER_MACHINE) {
             revert EpochCapReached();
@@ -232,7 +245,8 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
 
         uint256 gammaNeeded = energies * ENERGY_COST;
         imd.safeTransferFrom(msg.sender, address(this), maxImdIn);
-        uint256 imdSpent = abi.decode(poolManager.unlock(abi.encode(false, gammaNeeded, maxImdIn)), (uint256));
+        uint256 imdSpent =
+            abi.decode(poolManager.unlock(abi.encode(false, gammaNeeded, maxImdIn, uint160(0))), (uint256));
         if (imdSpent > maxImdIn) revert SlippageExceeded();
         if (maxImdIn > imdSpent) imd.safeTransfer(msg.sender, maxImdIn - imdSpent);
 
@@ -289,8 +303,18 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     function convertPendingImd(uint256 minGammaOut) external nonReentrant {
         uint256 amount = pendingImd;
         if (amount == 0) return;
-        pendingImd = 0;
-        uint256 out = abi.decode(poolManager.unlock(abi.encode(true, amount, minGammaOut)), (uint256));
+        // Reference: the pool's last price in an earlier block, which a caller cannot move in this transaction.
+        _observe();
+        uint160 ref = obsBlock == block.number ? prevObsPrice : obsPrice;
+        if (ref == 0) return; // no earlier-block price yet: convert later
+        uint256 limit = _gammaIs0
+            ? uint256(ref) * (BPS + CONVERT_SQRT_TOLERANCE_BPS) / BPS
+            : uint256(ref) * (BPS - CONVERT_SQRT_TOLERANCE_BPS) / BPS;
+        (uint160 price,,,) = StateLibrary.getSlot0(poolManager, PoolIdLibrary.toId(_poolKey));
+        if (_gammaIs0 ? price >= limit : price <= limit) return; // price already pushed past the bound
+        (uint256 out, uint256 imdIn) =
+            abi.decode(poolManager.unlock(abi.encode(true, amount, minGammaOut, uint160(limit))), (uint256, uint256));
+        pendingImd = amount - imdIn; // a partial fill keeps the rest for a later conversion
         gammaHeld += out;
         _fund(today(), out, SOURCE_TRADING);
     }
@@ -299,6 +323,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     /// @dev Only tokens that actually arrived are credited: the hook's word alone never moves the Harvest.
     function onHookFee(Currency currency, uint256 amount) external nonReentrant {
         if (msg.sender != hook) revert NotHook();
+        _observe();
         if (Currency.unwrap(currency) == address(gamma)) {
             if (gamma.balanceOf(address(this)) < gammaHeld + amount) revert FeeNotReceived();
             gammaHeld += amount;
@@ -315,7 +340,8 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     /// exactInImd=true: sell exactly `amount` IMD for at least `limit` GAMMA. Returns the IMD spent or GAMMA bought.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
-        (bool exactInImd, uint256 amount, uint256 limit) = abi.decode(data, (bool, uint256, uint256));
+        (bool exactInImd, uint256 amount, uint256 limit, uint160 priceLimit) =
+            abi.decode(data, (bool, uint256, uint256, uint160));
 
         bool zeroForOne = !_gammaIs0; // IMD in, GAMMA out
         BalanceDelta delta = poolManager.swap(
@@ -323,10 +349,13 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
             SwapParams({
                 zeroForOne: zeroForOne,
                 amountSpecified: exactInImd ? -int256(amount) : int256(amount),
-                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+                sqrtPriceLimitX96: priceLimit != 0
+                    ? priceLimit
+                    : (zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1)
             }),
             ""
         );
+        _observe();
 
         (int128 imdDelta, int128 gammaDelta) =
             _gammaIs0 ? (delta.amount1(), delta.amount0()) : (delta.amount0(), delta.amount1());
@@ -345,7 +374,18 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         poolManager.settle();
         poolManager.take(Currency.wrap(address(gamma)), address(this), gammaOut);
 
-        return abi.encode(exactInImd ? gammaOut : imdIn);
+        return exactInImd ? abi.encode(gammaOut, imdIn) : abi.encode(imdIn);
+    }
+
+    /// @dev Records the pool's current price. Every swap is seen: the hook reports each fee-bearing one and the
+    /// game's own swaps observe here, so `obsPrice` is the last price of block `obsBlock`.
+    function _observe() internal {
+        (uint160 price,,,) = StateLibrary.getSlot0(poolManager, PoolIdLibrary.toId(_poolKey));
+        if (obsBlock != block.number) {
+            prevObsPrice = obsPrice;
+            obsBlock = uint64(block.number);
+        }
+        obsPrice = price;
     }
 
     // ------------------------------------------------------------------ settlement
@@ -623,15 +663,17 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         seed = fallbackSeed[e];
         if (seed != bytes32(0)) return (seed, true);
 
+        // A proven drand round always wins over a fallback that has not been read yet.
+        bytes32 r = beacon.randomness(roundForEpoch(e));
+        if (r != bytes32(0)) return (keccak256(abi.encode(r, e)), false);
+
         uint256 committed = fallbackBlock[e];
-        if (committed == 0) {
-            bytes32 r = beacon.randomness(roundForEpoch(e));
-            if (r != bytes32(0)) return (keccak256(abi.encode(r, e)), false);
-            return (bytes32(0), block.timestamp >= epochEnd(e) + BEACON_FALLBACK);
-        }
+        if (committed == 0) return (bytes32(0), block.timestamp >= epochEnd(e) + BEACON_FALLBACK);
         if (block.number <= committed) return (bytes32(0), false); // committed in this block: wait for its hash
         bytes32 h = blockhash(committed);
-        if (h == bytes32(0)) return (bytes32(0), true); // unread for 256 blocks, the hash is gone: commit again
+        // Unread for 256 blocks, the hash is gone. The commitment is binding and is never renewed (that would let
+        // a lone settler re-roll): the epoch waits for its drand round, which stays provable forever.
+        if (h == bytes32(0)) return (bytes32(0), false);
         return (keccak256(abi.encode(h, e, "fallback")), true);
     }
 
@@ -639,7 +681,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     function pendingRound() external view returns (uint64) {
         uint256 e = cursor;
         if (genesis == 0 || e >= currentEpoch() || activeCursor >= activeEpochs.length) return 0;
-        if (activeEpochs[activeCursor] != e || fallbackBlock[e] != 0) return 0;
+        if (activeEpochs[activeCursor] != e || fallbackSeed[e] != bytes32(0)) return 0;
         uint64 round = roundForEpoch(e);
         return beacon.randomness(round) == bytes32(0) ? round : 0;
     }

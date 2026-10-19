@@ -109,6 +109,47 @@ because the launch needs `forge test` to pass with the project's own configurati
 Coverage note, nothing to fix. The return-tuple order at the `BLS.verifySingle` call site it mentions is unchanged:
 both flags are required, so the order is harmless.
 
+## Revision round (reviewer findings)
+
+### 5. `src/GammaGame.sol`: drand always wins, a fallback commitment is never renewed (finding `a48fbd6d…`, high)
+Reproduced with the reviewer's proof (a lone settler re-committed until a 77-survivor draw). `_seed` now reads
+`beacon.randomness(roundForEpoch(e))` first, so a proven round seeds the epoch unless a fallback seed has already
+been read and stored. An expired (unread for 256 blocks) commitment is no longer replaced: the epoch waits for its
+drand round, which stays provable at any later time. `pendingRound` keeps asking for the round until a fallback
+seed is stored. Change 3's tests `test_fallbackRecommitsWhenTheHashExpired` and
+`test_lateProofDoesNotReplaceCommittedFallback` encoded the old behaviour and were rewritten as
+`test_expiredFallbackIsNeverRecommitted` and `test_proofWinsOverUnreadFallback`. `BEACON_FALLBACK` stays 2h.
+
+### 6. `src/GammaGame.sol`: `convertPendingImd` swaps only near an earlier block's price and keeps unfilled IMD (findings `250bf221…`, `deb689d5…`, medium)
+Both reproduced. The game records the pool price on every hook fee report and every game swap (`obsPrice`,
+`prevObsPrice`, `obsBlock`); every non-game swap carries a fee, so this is the last price of each block.
+`convertPendingImd` uses the last price of an earlier block as reference, does nothing if none exists or the price
+is already more than `CONVERT_SQRT_TOLERANCE_BPS` (1% of sqrtPrice, ~2% of price) beyond it, and otherwise swaps
+with that bound as `sqrtPriceLimitX96`. `pendingImd` is set to the IMD not consumed, so a partial fill (bound
+reached, or no liquidity) keeps the rest for later. `unlockCallback` takes the price limit as a fourth field and
+returns `(gammaOut, imdIn)` for exact-input. Tests: `test/GammaRevision.t.sol` (`test_convertWaitsForEarlierBlockPrice`,
+`test_convertAfterPumpDoesNotSwapAtPumpedPrice`, `test_convertWithNoLiquidityKeepsImdPending`); `GammaHook.t.sol`
+`test_exactOutBuyFeeInImdThenConverted` now rolls one block before converting.
+
+### 7. `src/GammaGame.sol`: no purchase into an epoch whose drand round is already proven (finding `59bd4b18…`, medium)
+Reproduced. `buyEnergies` reverts `EpochSeedKnown` when `beacon.randomness(roundForEpoch(currentEpoch()))` is set.
+Test: `test_buyIntoProvenEpochReverts`.
+
+### 8. `src/GammaHook.sol`, `src/interfaces/IGammaGame.sol`: fee decay starts at the game's genesis (finding `77519280…`, medium)
+Reproduced. `feeBps` holds the 99% start fee while `game.genesis()` is 0 and decays from the later of pool creation
+and genesis, so the first trade possible pays the launch fee. `IGammaGame` gains the `genesis()` view (already public
+on `GammaGame`). The hook is not deployed by this launch. The pool remaining untradeable until `initialize` is
+unchanged (a game that has not started cannot account fees). Test: `test_feeHeldAtStartUntilGameGenesis`.
+
+### Advisory findings not changed
+- `bb6f63d5…` (claim fee measured from dayEnd): reproduces, low; left as the requester's fee schedule, since the
+  claimant gains nothing over waiting 24h.
+- `a93dc71c…` (crafted key in `initialize`): trust assumption on the configurator (the launch owner); the README
+  wording that overstated the check was corrected.
+- `e3c0656d…` (hook binds to the first IMD pool): belongs to the hook launch, which creates hook and pool in one
+  transaction; not changed.
+- `731480c4…` (bonus index dust): wei-level rounding, not changed.
+
 ## Not changed
 
 - `foundry.toml`, `remappings`, `lib/`, `.gitmodules`: protected. `bytecode_hash = "none"` was already set.
