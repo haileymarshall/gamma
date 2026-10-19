@@ -28,10 +28,15 @@ contract DrandBeaconTest is Test {
     }
 
     function test_idempotent() public {
-        beacon.prove(21600000, SIG_21600000);
         uint256 g = gasleft();
         beacon.prove(21600000, SIG_21600000);
-        assertLt(g - gasleft(), 10_000);
+        uint256 firstCall = g - gasleft();
+        g = gasleft();
+        beacon.prove(21600000, SIG_21600000);
+        uint256 secondCall = g - gasleft();
+        // A proven round is returned from storage: no pairing, a small fraction of the first call.
+        assertEq(beacon.randomness(21600000), sha256(SIG_21600000));
+        assertLt(secondCall, firstCall / 5);
     }
 
     function test_gas() public {

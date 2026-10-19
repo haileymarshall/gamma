@@ -50,10 +50,13 @@ Built for the [IMD Hackathon](https://www.imdradar.site/hackathon) and launched 
 | Problem | Fix |
 |---|---|
 | IMD launches mint a fixed 1B token and take 10% for the swarm | Rescaled ×100,000. The swarm's 10% replaces the NFT airdrop, `poolBps = 1000`, and the remaining 800M (`remainderTo`) goes to the game |
-| Block-hash randomness is weak, and worse on an L2 sequencer | Each epoch is seeded by the first **drand evmnet** round after it closes. Its BLS signature is verified on-chain on BN254 (`DrandBeacon`), and the frontend attaches the signature to purchases. If drand is missing for 2h, settlement falls back to block data so funds can never freeze |
+| Block-hash randomness is weak, and worse on an L2 sequencer | Each epoch is seeded by the first **drand evmnet** round after it closes. Its BLS signature is verified on-chain on BN254 (`DrandBeacon`), and the frontend attaches the signature to purchases. If drand is missing for 2h, settlement commits to the block it runs in and seeds the epoch from that block's hash in a later block (stored once per epoch), so funds can never freeze and no settler can pick the block that seeds an epoch |
 | Mainnet gas | Deployed on **Robinhood Chain** (Arbitrum Nitro). A normal purchase costs ~180k gas |
 | Immutable code with no audit | 54 Foundry tests (unit, fuzz, invariant solvency), drand checked against real signatures on a Robinhood fork, IMD's `audit-imported-code` + audit panel at launch, an optional IMD `audit` job (`launch/00-audit.json`), and a **7-day launch guardrail** (2,000 energies per machine per epoch) that lifts by itself |
-| No admin, but a one-time wiring step | `configurator` can call `initialize(poolKey)` exactly once and nothing else |
+| No admin, but a one-time wiring step | `configurator` can call `initialize(poolKey)` exactly once and nothing else. The key must name the pool the `GammaHook` bound to this game was initialized with, so a wrong key is rejected instead of locking the Reserve |
+| A hook fee was credited on the hook's word | `onHookFee` only credits GAMMA or IMD that actually arrived (`gammaHeld` mirrors the game's balance) |
+
+See `ADAPTATION.md` for the changes made for the IMD launch and the audit findings behind them.
 
 ## Run it
 

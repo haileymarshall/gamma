@@ -16,6 +16,7 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {GammaEmission} from "./libraries/GammaEmission.sol";
 import {IGammaBeacon} from "./interfaces/IGammaBeacon.sol";
 import {IGammaGame} from "./interfaces/IGammaGame.sol";
+import {IGammaHook} from "./interfaces/IGammaHook.sol";
 
 /// @title GammaGame
 /// @notice GAMMA can only be mined by playing. Players burn GAMMA (bought with IMD) for energies, place them on
@@ -128,6 +129,14 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     uint256 public totalBurned;
     uint256 public totalEnergies;
 
+    /// @notice GAMMA the game has accounted for. A hook fee is only credited once the tokens are really here.
+    uint256 public gammaHeld;
+
+    /// @notice Fallback seeding, per epoch: the block committed to, and the seed once that block's hash was read.
+    /// Committing first and reading later means no settler can pick the block that seeds an epoch.
+    mapping(uint256 => uint256) public fallbackBlock;
+    mapping(uint256 => bytes32) public fallbackSeed;
+
     // ------------------------------------------------------------------ events and errors
 
     event Initialized(address gamma, address hook, uint64 genesis);
@@ -139,8 +148,10 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     event Harvest(uint256 indexed day, uint256 pot, uint256 fails, uint256 perFail);
     event Claimed(address indexed owner, uint256 winnings, uint256 fee, uint256 bonus, uint256 paid);
     event HarvestFunded(uint256 indexed day, uint256 amount, uint8 source);
+    event FallbackCommitted(uint256 indexed epoch, uint256 blockNumber);
 
     error NotConfigurator();
+    error FeeNotReceived();
     error AlreadyInitialized();
     error NotInitialized();
     error BadPool();
@@ -184,6 +195,12 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         uint256 balance = gamma.balanceOf(address(this));
         if (balance < RESERVE) revert ReserveNotFunded();
 
+        // The key must be the pool the hook was initialized with (so fee and tick spacing cannot be wrong, which
+        // would lock the Reserve behind swaps that always revert), and the hook must be the one bound to this game.
+        if (address(IGammaHook(hook).game()) != address(this)) revert BadPool();
+        if (IGammaHook(hook).poolId() != keccak256(abi.encode(key))) revert BadPool();
+
+        gammaHeld = balance;
         genesis = uint64(block.timestamp);
         if (balance > RESERVE) _fund(0, balance - RESERVE, SOURCE_SURPLUS);
 
@@ -264,6 +281,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     function donate(uint256 amount) external nonReentrant {
         if (genesis == 0) revert NotInitialized();
         gamma.safeTransferFrom(msg.sender, address(this), amount);
+        gammaHeld += amount;
         _fund(today(), amount, SOURCE_DONATION);
     }
 
@@ -273,15 +291,20 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         if (amount == 0) return;
         pendingImd = 0;
         uint256 out = abi.decode(poolManager.unlock(abi.encode(true, amount, minGammaOut)), (uint256));
+        gammaHeld += out;
         _fund(today(), out, SOURCE_TRADING);
     }
 
     /// @inheritdoc IGammaGame
-    function onHookFee(Currency currency, uint256 amount) external {
+    /// @dev Only tokens that actually arrived are credited: the hook's word alone never moves the Harvest.
+    function onHookFee(Currency currency, uint256 amount) external nonReentrant {
         if (msg.sender != hook) revert NotHook();
         if (Currency.unwrap(currency) == address(gamma)) {
+            if (gamma.balanceOf(address(this)) < gammaHeld + amount) revert FeeNotReceived();
+            gammaHeld += amount;
             _fund(today(), amount, SOURCE_TRADING);
         } else {
+            if (imd.balanceOf(address(this)) < pendingImd + amount) revert FeeNotReceived();
             pendingImd += amount;
         }
     }
@@ -361,8 +384,16 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
                 continue;
             }
 
-            bytes32 seed = epochSeed(e);
-            if (seed == bytes32(0)) break;
+            (bytes32 seed, bool commit) = _seed(e);
+            if (seed == bytes32(0)) {
+                if (commit) {
+                    // Nobody chose this block's hash: it is read, and fixed for the epoch, from the next block on.
+                    fallbackBlock[e] = block.number;
+                    emit FallbackCommitted(e, block.number);
+                }
+                break;
+            }
+            if (commit && fallbackSeed[e] == bytes32(0)) fallbackSeed[e] = seed;
 
             Epoch storage ep = _epochs[e];
             uint256[] storage list = _epochBatches[e];
@@ -485,6 +516,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         _days[today()].pot += harvestPart;
 
         payout = winningsTotal - feeTotal + bonusTotal;
+        gammaHeld -= payout + burnPart;
         gamma.safeTransfer(msg.sender, payout);
         emit Claimed(msg.sender, winningsTotal, feeTotal, bonusTotal, payout);
     }
@@ -576,20 +608,38 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         return uint64((t - g + p - 1) / p + 1);
     }
 
+    /// @notice Seed of epoch `e`, or zero while none is available yet. From drand when its round is proven before
+    /// the fallback is committed; otherwise from the hash of the block settlement committed to, which is fixed
+    /// for the epoch the first time it is read.
     function epochSeed(uint256 e) public view returns (bytes32) {
-        bytes32 r = beacon.randomness(roundForEpoch(e));
-        if (r != bytes32(0)) return keccak256(abi.encode(r, e));
-        if (block.timestamp >= epochEnd(e) + BEACON_FALLBACK) {
-            return keccak256(abi.encode(blockhash(block.number - 1), e, "fallback"));
+        (bytes32 seed,) = _seed(e);
+        return seed;
+    }
+
+    /// @return seed The epoch's seed, or zero while none is available.
+    /// @return viaFallback With a seed: it came from the fallback and is to be stored. Without one: settlement
+    /// should commit to the current block (the fallback window is open and no readable commitment exists).
+    function _seed(uint256 e) internal view returns (bytes32 seed, bool viaFallback) {
+        seed = fallbackSeed[e];
+        if (seed != bytes32(0)) return (seed, true);
+
+        uint256 committed = fallbackBlock[e];
+        if (committed == 0) {
+            bytes32 r = beacon.randomness(roundForEpoch(e));
+            if (r != bytes32(0)) return (keccak256(abi.encode(r, e)), false);
+            return (bytes32(0), block.timestamp >= epochEnd(e) + BEACON_FALLBACK);
         }
-        return bytes32(0);
+        if (block.number <= committed) return (bytes32(0), false); // committed in this block: wait for its hash
+        bytes32 h = blockhash(committed);
+        if (h == bytes32(0)) return (bytes32(0), true); // unread for 256 blocks, the hash is gone: commit again
+        return (keccak256(abi.encode(h, e, "fallback")), true);
     }
 
     /// @notice The drand round settlement is waiting on, or 0 if none.
     function pendingRound() external view returns (uint64) {
         uint256 e = cursor;
         if (genesis == 0 || e >= currentEpoch() || activeCursor >= activeEpochs.length) return 0;
-        if (activeEpochs[activeCursor] != e) return 0;
+        if (activeEpochs[activeCursor] != e || fallbackBlock[e] != 0) return 0;
         uint64 round = roundForEpoch(e);
         return beacon.randomness(round) == bytes32(0) ? round : 0;
     }

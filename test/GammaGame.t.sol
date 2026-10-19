@@ -126,8 +126,15 @@ contract GammaGameTest is GammaFixture {
         buy(alice, 0, 50);
         uint256 e = game.currentEpoch();
         vm.warp(game.epochEnd(e) + 2 hours);
+        // The first call commits to the block it runs in; the seed is read from its hash in a later block.
+        game.settle(256, noProofs);
+        assertEq(game.cursor(), e, "committed, not yet seeded");
+        assertEq(game.fallbackBlock(e), block.number);
+        assertEq(game.epochSeed(e), bytes32(0));
+        vm.roll(block.number + 1);
         game.settle(256, noProofs);
         assertGt(game.cursor(), e);
+        assertEq(game.fallbackSeed(e), keccak256(abi.encode(blockhash(block.number - 1), e, "fallback")));
     }
 
     function test_roundForEpochIsAfterClose() public view {
