@@ -1,5 +1,5 @@
 {
-  "objective": "Launch Gamma (GAMMA) with the Uniswap v4 hook in this repository, src/GammaHook.sol, without changing its logic. Constructor (poolManager 0x8366a39cc670b4001a1121b8f6a443a643e40951, imd 0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127, game GAME_ADDRESS). The hook charges every swap a fee that starts at 99% (9900 bps) at pool initialization and falls by 100 bps per minute to a floor of 3% (300 bps) from minute 96, forever. The fee is always taken in GAMMA (exact-input buys: from the output; sells: from the GAMMA input), and 100% is sent to the GammaGame contract as tonight's Harvest for the miners. Exact-output buys from anyone but the game revert with ExactOutputBuyNotSupported, because they are the only shape whose fee would be in IMD. The fee schedule is held at 99% until GammaGame.genesis() is set and decays from the later of pool creation and genesis. Swaps sent by the GammaGame contract are exempt. Hook permissions: beforeInitialize, afterInitialize, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta. The hook has no owner-only functions and no backend signer. Pair with IMD. 10% of supply seeds the pool; the remaining 80% goes to the GammaGame contract as its Reserve.",
+  "objective": "Launch Gamma (GAMMA) with the Uniswap v4 hook in this repository, src/GammaHook.sol, without changing its logic. Constructor (poolManager 0x8366a39cc670b4001a1121b8f6a443a643e40951, imd 0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127, game 0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535). The hook charges every swap a fee that starts at 99% (9900 bps) at pool initialization and falls by 100 bps per minute to a floor of 3% (300 bps) from minute 96, forever. The fee is always taken in GAMMA (exact-input buys: from the output; sells: from the GAMMA input), and 100% is sent to the GammaGame contract as tonight's Harvest for the miners. Exact-output buys from anyone but the game revert with ExactOutputBuyNotSupported, because they are the only shape whose fee would be in IMD. The fee schedule is held at 99% until GammaGame.genesis() is set and decays from the later of pool creation and genesis. Swaps sent by the GammaGame contract are exempt. Hook permissions: beforeInitialize, afterInitialize, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta. The hook has no owner-only functions and no backend signer. Pair with IMD. 10% of supply seeds the pool; the remaining 80% goes to the GammaGame contract as its Reserve.",
   "shape": "chain",
   "references": [
     "uniswap-v4-hooks",
@@ -20,9 +20,9 @@
   "chainId": 4663,
   "pairWith": "imd",
   "repoUrl": "https://github.com/haileymarshall/gamma.git",
-  "baseCommit": "baf28a81b051d10c8590762fa18dd2ae88791ad4",
+  "baseCommit": "38e05aff26946e4d9a85af5dc303bc10a7121f66",
   "economics": {
     "poolBps": 1000,
-    "remainderTo": "GAME_ADDRESS"
+    "remainderTo": "0xb333a22c2c3dd0fe29fd1bf184c5ff2282148535"
   }
 }
