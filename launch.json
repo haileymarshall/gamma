@@ -1,0 +1,19 @@
+{
+  "kind": "evm_contracts",
+  "contracts": [
+    {
+      "contract": "DrandBeacon",
+      "constructorArgs": []
+    },
+    {
+      "contract": "GammaGame",
+      "constructorArgs": [
+        "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127",
+        "$contract:DrandBeacon",
+        "$owner"
+      ]
+    }
+  ],
+  "notes": "DrandBeacon permissionlessly verifies drand evmnet BLS signatures on BN254 and has no constructor arguments. GammaGame is the proof-of-play mining game for the GAMMA/IMD pool, built with the given Uniswap v4 PoolManager and IMD addresses and the deployed DrandBeacon. Players buy energies with IMD (the GAMMA bought is burned) and place them on four machines with 10/30/60/90% fail rates; a fixed 800M GAMMA Reserve is released every 10 minutes, survivors split the Shares and failures split the evening Harvest. Claim fees fall from 80% to 10% over 24 hours and are split among burning, the unclaimed bonus and the Harvest. GammaGame has no owner, mint or withdraw and no backend signer. It deploys uninitialized; $owner is its configurator, whose only power is one call to initialize with the GAMMA/IMD pool key, which requires the Reserve to be funded and the key's hook to be bound to this game and that pool. The hook and pool are created outside this manifest."
+}

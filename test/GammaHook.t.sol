@@ -74,7 +74,7 @@ contract GammaHookTest is GammaFixture {
 
         uint256 d = game.today();
         uint256 potBefore = game.getDay(d).pot;
-        game.convertPendingImd(0);
+        game.convertPendingImd(0); // the buy moved the price within the reference's tolerance
         assertEq(game.pendingImd(), 0);
         assertEq(imd.balanceOf(address(game)), 0);
         assertGt(game.getDay(d).pot, potBefore);
@@ -119,7 +119,8 @@ contract GammaHookTest is GammaFixture {
     function test_secondPoolRejected() public {
         MockERC20 other = new MockERC20("X", "X", 18);
         PoolKey memory k = key;
-        (address a, address b) = address(other) < address(imd) ? (address(other), address(imd)) : (address(imd), address(other));
+        (address a, address b) =
+            address(other) < address(imd) ? (address(other), address(imd)) : (address(imd), address(other));
         k.currency0 = Currency.wrap(a);
         k.currency1 = Currency.wrap(b);
         vm.expectRevert();

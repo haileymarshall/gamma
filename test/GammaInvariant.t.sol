@@ -67,6 +67,8 @@ contract GammaHandler is Test {
 
     function warp(uint256 secs) external {
         vm.warp(block.timestamp + bound(secs, 1 minutes, 30 hours));
+        // Blocks pass with time, so a committed fallback seed can be read (settlement needs a later block).
+        vm.roll(block.number + 1);
     }
 
     function proveAll() external {
@@ -135,5 +137,11 @@ contract GammaInvariantTest is GammaFixture {
 
     function invariant_cursorNeverAhead() public view {
         assertLe(game.cursor(), game.currentEpoch());
+    }
+
+    /// @dev The game's accounted GAMMA is exactly what it holds: every purchase, claim, hook fee, donation and
+    /// conversion keeps the mirror in step with the balance, so a hook fee can never be credited unbacked.
+    function invariant_gammaHeldMatchesBalance() public view {
+        assertEq(game.gammaHeld(), gamma.balanceOf(address(game)));
     }
 }
