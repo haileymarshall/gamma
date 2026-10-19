@@ -1,0 +1,235 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #05050a;
+  --bg-2: #0b0b14;
+  --panel: rgba(18, 18, 30, 0.72);
+  --panel-solid: #11111c;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.14);
+  --text: #ecebf5;
+  --muted: #8f8ea6;
+  --dim: #5d5c73;
+  --gamma: #d8ff3e;
+  --gamma-soft: rgba(216, 255, 62, 0.14);
+  --earth: #7dff8a;
+  --water: #4fd8ff;
+  --fire: #ff7a45;
+  --air: #c9a2ff;
+  --danger: #ff5d73;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-gamma: var(--gamma);
+  --color-earth: var(--earth);
+  --color-water: var(--water);
+  --color-fire: var(--fire);
+  --color-air: var(--air);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-code);
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-display), system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Background: a faint grid and a radiation bloom. */
+.bg-field {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 50% -10%, rgba(216, 255, 62, 0.09), transparent 60%),
+    radial-gradient(40rem 30rem at 100% 30%, rgba(201, 162, 255, 0.07), transparent 60%),
+    radial-gradient(40rem 30rem at 0% 70%, rgba(79, 216, 255, 0.06), transparent 60%),
+    linear-gradient(var(--bg), var(--bg));
+}
+.bg-field::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 20%, black 30%, transparent 75%);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  backdrop-filter: blur(14px);
+}
+
+.label {
+  font-family: var(--font-code), monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.num {
+  font-family: var(--font-code), monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-weight: 600;
+  transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s;
+}
+.btn:active {
+  transform: translateY(1px) scale(0.99);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--gamma);
+  color: #0a0a00;
+  box-shadow: 0 0 0 1px rgba(216, 255, 62, 0.4), 0 10px 40px -10px rgba(216, 255, 62, 0.55);
+}
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 0 1px rgba(216, 255, 62, 0.8), 0 14px 50px -8px rgba(216, 255, 62, 0.75);
+}
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.glow-text {
+  text-shadow: 0 0 30px rgba(216, 255, 62, 0.45);
+}
+
+@keyframes rise {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-120px) scale(0.4);
+    opacity: 0;
+  }
+}
+.particle {
+  position: absolute;
+  bottom: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  animation: rise linear infinite;
+}
+
+@keyframes pulse-ring {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+.pulse {
+  animation: pulse-ring 2.4s ease-in-out infinite;
+}
+
+@keyframes scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  animation: scan 3.5s ease-in-out infinite;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  width: 100%;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent, var(--gamma)) var(--fill, 0%), rgba(255, 255, 255, 0.1) var(--fill, 0%));
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.1);
+}
+input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--accent, var(--gamma));
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 99px;
+  background: #fff;
+  box-shadow: 0 0 0 4px var(--accent, var(--gamma)), 0 0 20px var(--accent, var(--gamma));
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 99px;
+  background: #fff;
+  border: 0;
+  box-shadow: 0 0 0 4px var(--accent, var(--gamma));
+}
+
+::selection {
+  background: var(--gamma);
+  color: #000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particle,
+  .pulse,
+  .scan::after {
+    animation: none !important;
+  }
+}
