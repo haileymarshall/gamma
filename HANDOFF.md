@@ -1,6 +1,6 @@
 # Handoff: where the GAMMA launch stands
 
-Last updated: 2026-10-19 19:10 UTC. Hackathon deadline: **21 Oct 2026** (submit at imdradar.site/hackathon).
+Last updated: 2026-10-19 (after the Vercel deploy). Hackathon deadline: **21 Oct 2026** (submit at imdradar.site/hackathon).
 Background and rules are in `PROJECT.md`; game rules in `README.md`; every audit change in `ADAPTATION.md`.
 
 ## Where we stopped
@@ -41,14 +41,16 @@ copy. Balance: ~0.02 IMD, ~0.0013 ETH.
 
 ## Remaining steps
 
-1. **Frontend to Vercel**: `frontend/` builds with no env vars (addresses are defaults in `src/lib/config.ts`;
-   `NEXT_PUBLIC_DEMO=1` switches to the simulation). The user's Vercel account is logged in; ask before deploying.
-   Set `NEXT_PUBLIC_X_URL` once the X account exists.
-2. **User**: create the project's X account.
-3. **Submit** at imdradar.site/hackathon: project X handle, a 20 to 1,000 character description, contract address
-   (GammaGame `0xb333…8535` or GAMMA `0xb307…0b44`). Public and not editable.
-4. Optional: the launch wallet earns 1% of pool trades as payer; `PROJECT.md` promises to forward it to the Harvest
+1. **User**: create the project's X account and send the handle.
+2. **Add the X link to the site**: set `NEXT_PUBLIC_X_URL` in Vercel (`vercel env add NEXT_PUBLIC_X_URL production`
+   in `frontend/`), then redeploy (`vercel deploy --prod --yes` or push to `main`).
+3. **Submit** at imdradar.site/hackathon **before 21 Oct**: project X handle, a 20 to 1,000 character description
+   (draft it for the user), contract address (GammaGame `0xb333…8535` or GAMMA `0xb307…0b44`), site
+   https://gamma-snowy.vercel.app. Public and not editable, so the user reviews it first.
+4. Optional: a custom domain for the site (`gamma.vercel.app` is taken by someone else).
+5. Optional: the launch wallet earns 1% of pool trades as payer; `PROJECT.md` promises to forward it to the Harvest
    (`donate`). Hook fees deferred on large sells can be pushed to the game by anyone with `GammaHook.redeemFees()`.
+6. User: confirm prize payout with @imdradar (the radar lists IMD's factory as the deployer).
 
 ## What happened, in order
 
@@ -85,3 +87,7 @@ copy. Balance: ~0.02 IMD, ~0.0013 ETH.
    balance and are credited by `initialize`). Merged delivered commit `f918718`.
 9. Ran `initialize` from the launch wallet: the game is live. Frontend switched to live mode by default, ABI
    regenerated, a prerender bug in `useLiveGame` (reading `Date.now()` during render) fixed.
+10. Deployed the frontend to Vercel: project `haileymarshalls-projects/gamma`, production URL
+    https://gamma-snowy.vercel.app (checked: 200, live game address on the page). Project root directory set to
+    `frontend/` and the GitHub repo `haileymarshall/gamma` connected, so pushes to `main` redeploy (verified with
+    commit `289249a`).
