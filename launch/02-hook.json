@@ -20,7 +20,7 @@
   "chainId": 4663,
   "pairWith": "imd",
   "repoUrl": "https://github.com/haileymarshall/gamma.git",
-  "baseCommit": "b9b13e887d8a8e986d6b3473fc68c94d0dfb10d5",
+  "baseCommit": "baf28a81b051d10c8590762fa18dd2ae88791ad4",
   "economics": {
     "poolBps": 1000,
     "remainderTo": "GAME_ADDRESS"
