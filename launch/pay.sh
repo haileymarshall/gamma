@@ -3,8 +3,17 @@
 # Usage: launch/pay.sh approve            once, lets the Intake pull up to 1 IMD
 #        launch/pay.sh launch/01-game.json
 #        launch/pay.sh launch/02-hook.json
-# Signs with the Foundry keystore account "gamma": cast wallet import gamma --interactive
+# Signs with the key in ~/.gamma/deployer.env if it exists, else the Foundry keystore account "gamma"
+# (cast wallet import gamma --interactive).
 set -euo pipefail
+
+if [[ -f ~/.gamma/deployer.env ]]; then
+  # shellcheck disable=SC1090
+  source ~/.gamma/deployer.env
+  SIGNER=(--private-key "$GAMMA_PRIVATE_KEY")
+else
+  SIGNER=(--account gamma)
+fi
 
 IMD_API=https://api.imd.fun
 RPC=https://rpc.mainnet.chain.robinhood.com
@@ -13,7 +22,7 @@ IMD=0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127
 PRICE=500000000000000000
 
 if [[ "${1:-}" == "approve" ]]; then
-  cast send $IMD 'approve(address,uint256)' $INTAKE 1000000000000000000 --rpc-url $RPC --account gamma
+  cast send $IMD 'approve(address,uint256)' $INTAKE 1000000000000000000 --rpc-url $RPC "${SIGNER[@]}"
   exit 0
 fi
 
@@ -33,4 +42,4 @@ fi
 cast send $INTAKE 'request(bytes32,bytes,(address,bytes4),address,uint256)' \
   "$(cast format-bytes32-string 'launch.open@launch-1')" "$(cast from-utf8 "$(jq -c . "$file")")" \
   '(0x0000000000000000000000000000000000000000,0x00000000)' $IMD $PRICE \
-  --rpc-url $RPC --account gamma
+  --rpc-url $RPC "${SIGNER[@]}"
