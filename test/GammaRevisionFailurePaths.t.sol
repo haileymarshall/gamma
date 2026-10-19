@@ -27,17 +27,27 @@ contract GammaRevisionFailurePathsTest is GammaFixture {
         assertEq(game.getBatch(id).epoch, e + 1);
     }
 
-    function test_convertWithoutAnyEarlierObservationIsNoOp() public {
-        // The fixture's pool saw no swap yet: no observation exists in any block.
-        assertEq(game.obsPrice(), 0);
-        swapExactOutBuy(bob, 50_000e18);
+    /// @dev Change 10 replaced the last-block observation (obsPrice/obsBlock) with a rate-limited reference.
+    /// The first observation seeds it from the pool rather than leaving conversion disabled, so the test
+    /// checks that seed and that the conversion then runs against it and cannot move it twice in one block.
+    function test_firstObservationSeedsReferenceThenConvertsAtIt() public {
+        // No non-game swap has happened since genesis, so nothing has observed the pool yet.
+        assertEq(game.refPrice(), 0);
+        assertEq(game.refTime(), 0);
+
+        swapExactOutBuy(bob, 50_000e18); // the hook's IMD fee report is the first observation
         uint256 pending = game.pendingImd();
         assertGt(pending, 0);
+        uint160 seeded = game.refPrice();
+        assertGt(seeded, 0, "first observation seeds the reference");
+        assertEq(game.refTime(), uint64(block.timestamp));
+
         uint256 held = game.gammaHeld();
-        game.convertPendingImd(type(uint256).max); // returns before the slippage check could fire
-        assertEq(game.pendingImd(), pending);
-        assertEq(game.gammaHeld(), held);
-        assertEq(game.obsBlock(), vm.getBlockNumber());
+        game.convertPendingImd(0);
+        assertLt(game.pendingImd(), pending, "conversion ran at the freshly seeded reference");
+        assertGt(game.gammaHeld(), held);
+        // Same timestamp: _observe may not move the reference a second time.
+        assertEq(game.refPrice(), seeded);
     }
 
     function test_partialFillAtBoundKeepsRemainderBacked() public {
@@ -75,18 +85,23 @@ contract GammaRevisionFailurePathsTest is GammaFixture {
         assertEq(game.pendingImd(), left);
     }
 
-    function test_expiredCommitmentKeepsAskingForDrand() public {
+    /// @dev Change 9 makes a commitment binding: an expired hash is not an invitation to ask for drand again.
+    /// Until the one-day recommit delay the epoch simply waits, and the frontend is not asked for a proof.
+    function test_expiredCommitmentStaysBindingAndAsksForNoProof() public {
         uint256 e = game.currentEpoch();
         buy(alice, 1, 10);
         vm.warp(game.epochEnd(e) + 2 hours);
         vm.roll(1000);
         game.settle(256, noProofs);
         assertEq(game.fallbackBlock(e), 1000);
-        assertEq(game.pendingRound(), game.roundForEpoch(e));
-        vm.roll(1300);
+        assertEq(game.pendingRound(), 0, "no proof asked for once committed");
+        vm.roll(1300); // 300 blocks later: the committed hash is gone
+        beacon.set(game.roundForEpoch(e), keccak256("late"));
         game.settle(256, noProofs);
-        assertEq(game.fallbackSeed(e), bytes32(0));
-        assertEq(game.pendingRound(), game.roundForEpoch(e), "stuck epoch must still ask for its round");
+        assertEq(game.fallbackBlock(e), 1000, "the commitment is not replaced");
+        assertEq(game.epochSeed(e), bytes32(0), "unread hash, not a drand seed");
+        assertEq(game.pendingRound(), 0, "still no proof asked for");
+        assertEq(game.cursor(), e, "the epoch waits rather than taking drand");
         // A purchase in the meantime still works and does not settle the stuck epoch.
         uint256 id = buy(bob, 0, 1);
         assertEq(game.getBatch(id).epoch, game.currentEpoch());
