@@ -49,8 +49,8 @@ export function HowItWorks() {
   return (
     <section id="how" className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
       <div className="label">How it works</div>
-      <h2 className="mt-3 max-w-2xl text-3xl font-bold tracking-tight sm:text-5xl">
-        A token with no way to buy in at launch. Only a way to play in.
+      <h2 className="mt-3 max-w-3xl text-4xl sm:text-6xl">
+        A token with no way to buy in at launch. <em>Only a way to play in.</em>
       </h2>
       <div className="mt-10 grid gap-3 md:grid-cols-5">
         {STEPS.map((s) => (
@@ -63,7 +63,7 @@ export function HowItWorks() {
       </div>
       <div className="mt-12 grid gap-3 sm:grid-cols-2">
         {IDEAS.map((i) => (
-          <div key={i.t} className="rounded-2xl border border-line bg-gradient-to-br from-white/[0.03] to-transparent p-6">
+          <div key={i.t} className="rounded-2xl border border-line bg-bg-2 p-6">
             <div className="text-lg font-semibold">{i.t}</div>
             <p className="mt-2 text-sm leading-relaxed text-muted">{i.b}</p>
           </div>

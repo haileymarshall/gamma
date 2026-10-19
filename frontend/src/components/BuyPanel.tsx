@@ -32,7 +32,7 @@ export function BuyPanel({ machine }: { machine: MachineId }) {
 
       <div className="mt-4 flex items-end justify-between">
         <div>
-          <div className="num text-5xl font-bold" style={{ color: m.hex }}>
+          <div className="font-serif text-6xl tabular-nums" style={{ color: m.hex }}>
             {energies}
           </div>
           <div className="text-sm text-muted">
@@ -61,7 +61,7 @@ export function BuyPanel({ machine }: { machine: MachineId }) {
             key={p}
             onClick={() => setEnergies(p)}
             className={`num flex-1 rounded-lg py-1.5 text-xs ${
-              energies === p ? "text-black" : "bg-white/5 text-muted hover:text-text"
+              energies === p ? "text-bg" : "bg-white/5 text-muted hover:text-text"
             }`}
             style={energies === p ? { background: m.hex } : undefined}
           >
@@ -98,7 +98,7 @@ export function BuyPanel({ machine }: { machine: MachineId }) {
           className="btn btn-primary mt-5 w-full text-base"
           disabled={!canBuy}
           onClick={() => a.buy(machine, energies)}
-          style={{ background: m.hex, boxShadow: `0 10px 40px -10px ${m.hex}` }}
+          style={{ background: m.hex, boxShadow: "4px 4px 0 var(--text)" }}
         >
           {g?.busy ? `${g.busy}…` : cost > (g?.imdBalance ?? 0) ? "Not enough IMD" : `Burn & mine on ${m.name}`}
         </button>

@@ -31,8 +31,8 @@ export function ImdSection() {
   return (
     <section id="imd" className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
       <div className="label">Built on IMD</div>
-      <h2 className="mt-3 max-w-3xl text-3xl font-bold tracking-tight sm:text-5xl">
-        A game that makes the swarm&apos;s token more useful every 10 minutes.
+      <h2 className="mt-3 max-w-3xl text-4xl sm:text-6xl">
+        A game that makes the swarm&apos;s token <em>more useful every 10 minutes.</em>
       </h2>
       <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {POINTS.map((p) => (

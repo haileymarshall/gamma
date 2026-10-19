@@ -4,26 +4,25 @@ import { useGame } from "./Providers";
 import { LINKS, chain } from "@/lib/config";
 import { short } from "@/lib/format";
 
-export function Logo({ size = 32 }: { size?: number }) {
+/** A pixel bonsai: leaves, trunk and tray on an 8×8 grid. */
+const LOGO = [
+  "..GGGG..",
+  ".GGLLGG.",
+  "GG.TT.GG",
+  "...TT...",
+  "..TT....",
+  "...TT...",
+  ".BBBBBB.",
+  "..BBBB..",
+];
+const LOGO_FILL: Record<string, string> = { G: "#3f8a67", L: "#7fbf98", T: "#a9432c", B: "#d1ae68" };
+
+export function Logo({ size = 26 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
-      <defs>
-        <radialGradient id="lg" cx="50%" cy="40%" r="60%">
-          <stop offset="0%" stopColor="#f4ffb0" />
-          <stop offset="60%" stopColor="#d8ff3e" />
-          <stop offset="100%" stopColor="#6f8f00" />
-        </radialGradient>
-      </defs>
-      <circle cx="20" cy="20" r="18" fill="none" stroke="url(#lg)" strokeWidth="1.5" opacity="0.5" />
-      <circle cx="20" cy="20" r="12" fill="none" stroke="url(#lg)" strokeWidth="1" opacity="0.3" />
-      <path
-        d="M11 13c3 0 5 2 7 7l3 7m0 0c1 3 1 6-1 7m1-7c2-6 5-11 8-14"
-        fill="none"
-        stroke="url(#lg)"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width={size} height={size} viewBox="0 0 8 8" shapeRendering="crispEdges" aria-hidden>
+      {LOGO.flatMap((row, y) =>
+        [...row].map((ch, x) => (ch === "." ? null : <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill={LOGO_FILL[ch]} />)),
+      )}
     </svg>
   );
 }
@@ -33,20 +32,20 @@ export function Header() {
   const live = g?.mode === "live";
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-bg/70 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-40 border-b border-text/80 bg-bg/90 backdrop-blur-md">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <a href="#" className="flex items-center gap-2.5">
           <Logo />
-          <span className="text-lg font-bold tracking-[0.2em]">GAMMA</span>
+          <span className="font-serif text-2xl tracking-tight">Gamma</span>
           <span
-            className={`hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-widest sm:inline ${
+            className={`num hidden border px-2 py-0.5 text-[10px] tracking-widest sm:inline ${
               live ? "border-earth/40 text-earth" : "border-gamma/40 text-gamma"
             }`}
           >
             {live ? `LIVE · ${chain.name.toUpperCase()}` : "DEMO · SIMULATED"}
           </span>
         </a>
-        <nav className="hidden items-center gap-6 text-sm text-muted md:flex">
+        <nav className="hidden items-center gap-7 text-[15px] text-text/85 md:flex">
           <a href="#play" className="hover:text-text">
             Play
           </a>
@@ -77,6 +76,15 @@ export function Header() {
               IMD Hackathon ↗
             </a>
           )}
+        </div>
+      </div>
+      <div className="border-t border-line">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-2.5 text-sm text-muted sm:px-6">
+          <span className="hidden sm:inline">A token you can only mine by playing</span>
+          <span className="truncate">Robinhood Chain · paired with IMD · no team, no admin</span>
+          <a href="#play" className="hidden border-b border-text/60 text-text hover:border-gamma hover:text-gamma md:inline">
+            Start mining →
+          </a>
         </div>
       </div>
     </header>

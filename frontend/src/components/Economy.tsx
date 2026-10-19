@@ -18,7 +18,7 @@ function Donut() {
   const offsets = slices.map((_, i) => slices.slice(0, i).reduce((s, a) => s + (a.value / 100) * C, 0));
   return (
     <svg viewBox="0 0 200 200" className="h-48 w-48 -rotate-90">
-      <circle cx="100" cy="100" r={R} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="26" />
+      <circle cx="100" cy="100" r={R} fill="none" stroke="rgba(236,230,214,0.05)" strokeWidth="26" />
       {slices.map((a, i) => {
         const len = (a.value / 100) * C;
         return (
@@ -86,7 +86,7 @@ function LineChart({
       >
         {yTicks.map((t) => (
           <g key={t}>
-            <line x1={P.l} x2={W - P.r} y1={sy(t)} y2={sy(t)} stroke="rgba(255,255,255,0.06)" />
+            <line x1={P.l} x2={W - P.r} y1={sy(t)} y2={sy(t)} stroke="rgba(236,230,214,0.06)" />
             <text x={P.l - 6} y={sy(t) + 3} textAnchor="end" fontSize="10" fill="var(--dim)" className="num">
               {yFmt(t)}
             </text>
@@ -101,7 +101,7 @@ function LineChart({
         <path d={d} fill="none" stroke={color} strokeWidth="2" />
         {hover && (
           <g>
-            <line x1={sx(hover.x)} x2={sx(hover.x)} y1={P.t} y2={H - P.b} stroke="rgba(255,255,255,0.2)" />
+            <line x1={sx(hover.x)} x2={sx(hover.x)} y1={P.t} y2={H - P.b} stroke="rgba(236,230,214,0.2)" />
             <circle cx={sx(hover.x)} cy={sy(hover.y)} r="4" fill={color} />
           </g>
         )}
@@ -132,8 +132,8 @@ export function Economy() {
   return (
     <section id="economy" className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
       <div className="label">Economy</div>
-      <h2 className="mt-3 max-w-2xl text-3xl font-bold tracking-tight sm:text-5xl">
-        1,000,000,000 GAMMA. Minted once. Supply only goes down.
+      <h2 className="mt-3 max-w-3xl text-4xl sm:text-6xl">
+        1,000,000,000 GAMMA. Minted once. <em>Supply only goes down.</em>
       </h2>
 
       <div className="mt-10 grid gap-3 lg:grid-cols-3">

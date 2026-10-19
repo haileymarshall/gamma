@@ -16,18 +16,18 @@ export function Harvest() {
         className="pointer-events-none absolute inset-x-0 bottom-0 transition-all"
         style={{
           height: `${Math.max(6, frac * 100)}%`,
-          background: "linear-gradient(to top, rgba(201,162,255,0.22), rgba(201,162,255,0.02))",
+          background: "linear-gradient(to top, rgba(209,174,104,0.16), rgba(209,174,104,0.01))",
         }}
         aria-hidden
       />
       <div className="relative">
         <div className="flex items-center justify-between">
           <div className="label">Tonight&apos;s Harvest</div>
-          <div className="num rounded-full border border-air/40 px-2 py-0.5 text-xs text-air">
+          <div className="num rounded-full border border-brass/40 px-2 py-0.5 text-xs text-brass">
             in {clock(g.harvestIn)}
           </div>
         </div>
-        <div className="num mt-3 text-4xl font-bold text-air">
+        <div className="mt-3 font-serif text-5xl text-brass tabular-nums">
           {fmt(g.pot)} <span className="text-base text-dim">GAMMA</span>
         </div>
         <div className="mt-1 text-sm text-muted">

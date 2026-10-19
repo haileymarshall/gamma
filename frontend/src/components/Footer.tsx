@@ -15,7 +15,7 @@ export function Footer() {
         <div className="flex items-center gap-3">
           <Logo size={28} />
           <div>
-            <div className="font-bold tracking-[0.2em]">GAMMA</div>
+            <div className="font-serif text-xl">Gamma</div>
             <div className="text-xs text-dim">Built for the IMD Hackathon. Launched through the swarm.</div>
           </div>
         </div>

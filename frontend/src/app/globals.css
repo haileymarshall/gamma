@@ -1,22 +1,25 @@
 @import "tailwindcss";
 
+/* Warm night palette: bone ink on brown-black, leaf green, brass, clay. */
 :root {
-  --bg: #05050a;
-  --bg-2: #0b0b14;
-  --panel: rgba(18, 18, 30, 0.72);
-  --panel-solid: #11111c;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-2: rgba(255, 255, 255, 0.14);
-  --text: #ecebf5;
-  --muted: #8f8ea6;
-  --dim: #5d5c73;
-  --gamma: #d8ff3e;
-  --gamma-soft: rgba(216, 255, 62, 0.14);
-  --earth: #7dff8a;
-  --water: #4fd8ff;
-  --fire: #ff7a45;
-  --air: #c9a2ff;
-  --danger: #ff5d73;
+  --bg: #15140f;
+  --bg-2: #1d1c16;
+  --panel: #1a1913;
+  --panel-solid: #1d1c16;
+  --line: #2f2c24;
+  --line-2: #3b382f;
+  --text: #ece6d6;
+  --muted: #a39c8b;
+  --dim: #8e877a;
+  --gamma: #7fbf98;
+  --gamma-soft: rgba(127, 191, 152, 0.12);
+  --brass: #d1ae68;
+  --earth: #7fbf98;
+  --water: #74b3d6;
+  --fire: #e0876d;
+  --air: #b8b2e0;
+  --danger: #e0876d;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .93  0 0 0 0 .90  0 0 0 0 .84  0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 @theme inline {
@@ -28,55 +31,64 @@
   --color-muted: var(--muted);
   --color-dim: var(--dim);
   --color-gamma: var(--gamma);
+  --color-brass: var(--brass);
   --color-earth: var(--earth);
   --color-water: var(--water);
   --color-fire: var(--fire);
   --color-air: var(--air);
   --color-danger: var(--danger);
-  --font-sans: var(--font-display);
+  --font-sans: var(--font-sans-face);
+  --font-serif: var(--font-serif-face);
   --font-mono: var(--font-code);
+}
+
+/* Square corners everywhere except dots and pills. */
+@theme {
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-2xl: 3px;
 }
 
 html {
   color-scheme: dark;
   scroll-behavior: smooth;
+  background: var(--bg);
 }
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-display), system-ui, sans-serif;
+  font-family: var(--font-sans-face), "Helvetica Neue", Arial, sans-serif;
   overflow-x: hidden;
 }
 
-/* Background: a faint grid and a radiation bloom. */
+h1,
+h2 {
+  font-family: var(--font-serif-face), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+h1 em,
+h2 em {
+  font-style: italic;
+  color: var(--gamma);
+}
+
+/* Background: paper grain over the night. */
 .bg-field {
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(60rem 40rem at 50% -10%, rgba(216, 255, 62, 0.09), transparent 60%),
-    radial-gradient(40rem 30rem at 100% 30%, rgba(201, 162, 255, 0.07), transparent 60%),
-    radial-gradient(40rem 30rem at 0% 70%, rgba(79, 216, 255, 0.06), transparent 60%),
-    linear-gradient(var(--bg), var(--bg));
-}
-.bg-field::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse at 50% 20%, black 30%, transparent 75%);
+  background: var(--grain), var(--bg);
 }
 
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 20px;
-  backdrop-filter: blur(14px);
+  border-radius: 2px;
 }
 
 .label {
@@ -97,9 +109,9 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border-radius: 12px;
+  border-radius: 0;
   padding: 12px 18px;
-  font-weight: 600;
+  font-weight: 500;
   transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s;
 }
 .btn:active {
@@ -110,24 +122,22 @@ body {
   cursor: not-allowed;
 }
 .btn-primary {
-  background: var(--gamma);
-  color: #0a0a00;
-  box-shadow: 0 0 0 1px rgba(216, 255, 62, 0.4), 0 10px 40px -10px rgba(216, 255, 62, 0.55);
+  background: var(--text);
+  color: var(--bg);
+  border: 1px solid var(--text);
+  box-shadow: 4px 4px 0 var(--gamma);
 }
 .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 0 0 1px rgba(216, 255, 62, 0.8), 0 14px 50px -8px rgba(216, 255, 62, 0.75);
+  box-shadow: 2px 2px 0 var(--gamma);
+  transform: translate(2px, 2px);
 }
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line-2);
+  background: transparent;
+  border: 1px solid var(--text);
   color: var(--text);
 }
 .btn-ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.glow-text {
-  text-shadow: 0 0 30px rgba(216, 255, 62, 0.45);
+  background: rgba(236, 230, 214, 0.06);
 }
 
 @keyframes rise {
@@ -175,6 +185,7 @@ body {
 }
 .scan::after {
   content: "";
+  pointer-events: none;
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
@@ -190,12 +201,12 @@ input[type="range"] {
 input[type="range"]::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 99px;
-  background: linear-gradient(90deg, var(--accent, var(--gamma)) var(--fill, 0%), rgba(255, 255, 255, 0.1) var(--fill, 0%));
+  background: linear-gradient(90deg, var(--accent, var(--gamma)) var(--fill, 0%), rgba(236, 230, 214, 0.1) var(--fill, 0%));
 }
 input[type="range"]::-moz-range-track {
   height: 6px;
   border-radius: 99px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(236, 230, 214, 0.1);
 }
 input[type="range"]::-moz-range-progress {
   height: 6px;
@@ -208,22 +219,22 @@ input[type="range"]::-webkit-slider-thumb {
   width: 20px;
   height: 20px;
   border-radius: 99px;
-  background: #fff;
-  box-shadow: 0 0 0 4px var(--accent, var(--gamma)), 0 0 20px var(--accent, var(--gamma));
+  background: var(--text);
+  box-shadow: 0 0 0 4px var(--accent, var(--gamma));
   cursor: pointer;
 }
 input[type="range"]::-moz-range-thumb {
   width: 20px;
   height: 20px;
   border-radius: 99px;
-  background: #fff;
+  background: var(--text);
   border: 0;
   box-shadow: 0 0 0 4px var(--accent, var(--gamma));
 }
 
 ::selection {
   background: var(--gamma);
-  color: #000;
+  color: var(--bg);
 }
 
 @media (prefers-reduced-motion: reduce) {

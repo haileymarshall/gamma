@@ -34,20 +34,20 @@ export function Reactor() {
 
       <div className="relative mx-auto my-2 aspect-square w-full max-w-[320px]">
         <svg viewBox="0 0 320 320" className="h-full w-full -rotate-90">
-          <circle cx="160" cy="160" r={R2} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="4" />
+          <circle cx="160" cy="160" r={R2} fill="none" stroke="rgba(236,230,214,0.07)" strokeWidth="4" />
           <circle
             cx="160"
             cy="160"
             r={R2}
             fill="none"
-            stroke="var(--air)"
+            stroke="var(--brass)"
             strokeWidth="4"
             strokeLinecap="round"
             strokeDasharray={c2}
             strokeDashoffset={c2 * (1 - dayFrac)}
             opacity="0.7"
           />
-          <circle cx="160" cy="160" r={R1} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="14" />
+          <circle cx="160" cy="160" r={R1} fill="none" stroke="rgba(236,230,214,0.07)" strokeWidth="14" />
           <circle
             cx="160"
             cy="160"
@@ -55,21 +55,21 @@ export function Reactor() {
             fill="none"
             stroke="url(#ring)"
             strokeWidth="14"
-            strokeLinecap="round"
+            strokeLinecap="butt"
             strokeDasharray={c1}
             strokeDashoffset={c1 * (1 - epochFrac)}
-            style={{ transition: "stroke-dashoffset 0.25s linear", filter: "drop-shadow(0 0 10px rgba(216,255,62,0.6))" }}
+            style={{ transition: "stroke-dashoffset 0.25s linear" }}
           />
           <defs>
             <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#f4ffb0" />
-              <stop offset="100%" stopColor="#d8ff3e" />
+              <stop offset="0%" stopColor="#c4f0d7" />
+              <stop offset="100%" stopColor="#3f8a67" />
             </linearGradient>
           </defs>
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
           <div className="label">Next draw in</div>
-          <div className="num glow-text text-5xl font-bold text-gamma">{clock(g.epochEndsIn)}</div>
+          <div className="mt-1 font-serif text-6xl text-gamma tabular-nums">{clock(g.epochEndsIn)}</div>
           <div className="mt-3 label">This epoch pays</div>
           <div className="num text-xl font-semibold">
             {fmt(g.tranche)} <span className="text-xs text-dim">GAMMA</span>
@@ -106,7 +106,7 @@ export function Reactor() {
                 key={s}
                 onClick={() => a.setSpeed(s)}
                 className={`num rounded-lg px-2.5 py-1 text-xs ${
-                  g.speed === s ? "bg-gamma text-black" : "bg-white/5 text-muted hover:text-text"
+                  g.speed === s ? "bg-text text-bg" : "bg-white/5 text-muted hover:text-text"
                 }`}
               >
                 {s}×

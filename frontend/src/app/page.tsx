@@ -25,7 +25,7 @@ export default function Home() {
       <Header />
       <main>
         <Hero />
-        <section id="play" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-10 sm:px-6">
+        <section id="play" className="mx-auto max-w-7xl scroll-mt-32 px-4 py-10 sm:px-6">
           {g?.mode === "demo" && (
             <div className="mb-4 rounded-xl border border-gamma/30 bg-gamma/5 px-4 py-3 text-sm text-gamma">
               Demo mode: the real game rules running against a simulated crowd with demo IMD. Speed up time on the clock

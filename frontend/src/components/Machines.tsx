@@ -1,33 +1,11 @@
 "use client";
 
 import { motion } from "motion/react";
-import { useMemo } from "react";
 import { useGame } from "./Providers";
 import { MACHINES, type MachineId } from "@/lib/gamma";
 import { fmt } from "@/lib/format";
-
-function Particles({ color, rate }: { color: string; rate: number }) {
-  const dots = useMemo(
-    () =>
-      Array.from({ length: 14 }, (_, i) => ({
-        left: `${(i * 37) % 100}%`,
-        delay: `${(i * 0.73) % 4}s`,
-        dur: `${2.4 + ((i * 1.3) % 2.6)}s`,
-      })),
-    [],
-  );
-  return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 overflow-hidden" aria-hidden>
-      {dots.slice(0, Math.max(3, Math.round(rate * 14))).map((d, i) => (
-        <span
-          key={i}
-          className="particle"
-          style={{ left: d.left, animationDelay: d.delay, animationDuration: d.dur, background: color, boxShadow: `0 0 8px ${color}` }}
-        />
-      ))}
-    </div>
-  );
-}
+import { MACHINE_SCENE } from "@/lib/voxel";
+import { VoxelCanvas } from "./VoxelCanvas";
 
 export function Machines({ selected, onSelect }: { selected: MachineId; onSelect: (m: MachineId) => void }) {
   const [g] = useGame();
@@ -45,28 +23,29 @@ export function Machines({ selected, onSelect }: { selected: MachineId; onSelect
             onClick={() => onSelect(m.id as MachineId)}
             whileHover={{ y: -2 }}
             whileTap={{ scale: 0.98 }}
-            className="panel scan relative overflow-hidden p-4 text-left transition-colors"
+            className="panel relative overflow-hidden text-left transition-colors"
             style={{
               borderColor: active ? m.hex : undefined,
-              boxShadow: active ? `0 0 0 1px ${m.hex}, 0 20px 60px -20px ${m.hex}` : undefined,
+              boxShadow: active ? `4px 4px 0 ${m.hex}` : undefined,
             }}
             aria-pressed={active}
           >
-            <Particles color={m.hex} rate={m.fail} />
+            <div className="relative h-36 border-b border-line bg-bg-2">
+              <VoxelCanvas scene={MACHINE_SCENE[m.id]} spin={0.3} className="h-full w-full" label={`${m.name} machine`} />
+              {active && <span className="num absolute left-3 top-3 text-[10px] tracking-widest" style={{ color: m.hex }}>SELECTED</span>}
+            </div>
+            <div className="p-4">
             <div className="relative flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xl" style={{ color: m.hex }}>
-                    {m.glyph}
-                  </span>
-                  <span className="text-lg font-bold">{m.name}</span>
+                  <span className="font-serif text-2xl">{m.name}</span>
                 </div>
                 <div className="label mt-1" style={{ color: m.hex }}>
                   {m.profile}
                 </div>
               </div>
               <div className="text-right">
-                <div className="num text-2xl font-bold" style={{ color: m.hex }}>
+                <div className="num text-2xl font-medium" style={{ color: m.hex }}>
                   {Math.round(m.fail * 100)}%
                 </div>
                 <div className="label">fail rate</div>
@@ -94,8 +73,8 @@ export function Machines({ selected, onSelect }: { selected: MachineId; onSelect
                   <span
                     className="num rounded-md px-1.5 py-0.5 font-semibold"
                     style={{
-                      background: mv.last.shareTenths === 6 ? m.hex : "rgba(255,255,255,0.06)",
-                      color: mv.last.shareTenths === 6 ? "#000" : "var(--muted)",
+                      background: mv.last.shareTenths === 6 ? m.hex : "rgba(236,230,214,0.06)",
+                      color: mv.last.shareTenths === 6 ? "var(--bg)" : "var(--muted)",
                     }}
                   >
                     last: {mv.last.shareTenths * 10}% share
@@ -108,6 +87,7 @@ export function Machines({ selected, onSelect }: { selected: MachineId; onSelect
               ) : (
                 <span className="text-dim">{m.blurb}</span>
               )}
+            </div>
             </div>
           </motion.button>
         );
