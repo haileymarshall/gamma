@@ -154,14 +154,21 @@ Judges reward what helps IMD itself: paid demand for the swarm and oracle (its w
     - Demo mode runs the same rules against a simulated crowd, with a time speed-up.
     - The production build passes and the full play flow was checked in headless Chromium.
 
+- 2026-10-19: Launch run on Robinhood Chain.
+  - Foundry project moved to the repo root (IMD import requires it). Pinned commit `b9b13e8`.
+  - Launch wallet `0x4De63474F3715C407DaFAa1429FA664559814401` (key in `~/.gamma/deployer.env`, never committed). It is the payer, so IMD records it as `paidBy`/requester and it gets the owner role.
+  - Bought 1.02 IMD on the IMD/ETH v4 pool through a self-deployed `PoolSwapTest` router (`0x0a8c…268B`).
+  - Paid `01-game.json` (tx `0xea4f…4558`), IMD job `137fee05-7413-46fb-b03b-45db0221ea93`.
+  - The prize "deployer" on the radar is IMD's factory for every IMD launch; IMD records the paying wallet onchain.
+
 ## Submission checklist
 - [x] Pick name + idea (GAMMA)
 - [x] Contracts + tests
 - [x] Frontend (demo mode works)
-- [ ] Push to a **public** GitHub repo and resolve the commit with `POST /requests/import`
-- [ ] Fill `repoUrl`, `baseCommit` and `owner` in `launch/*.json`
-- [ ] (optional) Submit `launch/00-audit.json` (0.5 IMD)
-- [ ] Submit `launch/01-game.json` (0.5 IMD), note the GammaGame address
+- [x] Push to a **public** GitHub repo and resolve the commit with `POST /requests/import`
+- [x] Fill `repoUrl` and `baseCommit` in `launch/*.json` (no `owner`: the payer is the owner)
+- [x] Skip `launch/00-audit.json`: every launch already runs the audit panel
+- [x] Submit `launch/01-game.json` (0.5 IMD) — paid; waiting for the GammaGame address
 - [ ] Fill `GAME_ADDRESS` in `launch/02-hook.json` and submit it (0.5 IMD)
 - [ ] Run `InitializeGame.s.sol` with the pool from the launch record
 - [ ] Commit to sending the paying wallet's 1% LP fee share to the Harvest (`donate`)
