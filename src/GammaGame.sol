@@ -55,11 +55,17 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     uint256 public constant BEACON_DELAY = 6;
     /// @notice If the beacon never delivers, settlement falls back to block data after this long so funds never freeze.
     uint256 public constant BEACON_FALLBACK = 2 hours;
+    /// @notice A fallback commitment whose block hash expired unread may be renewed only this long after it was made.
+    uint256 public constant FALLBACK_RECOMMIT_DELAY = 1 days;
 
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
     uint256 internal constant INDEX_SCALE = 1e36;
-    /// @dev convertPendingImd may move sqrtPrice at most 1% (price ~2%) from the last price of an earlier block.
+    /// @dev convertPendingImd may move sqrtPrice at most 1% (price ~2%) past the reference price.
     uint256 public constant CONVERT_SQRT_TOLERANCE_BPS = 100;
+    /// @dev The reference sqrtPrice follows the pool at most this fast (bps per minute) ...
+    uint256 public constant REF_RATE_BPS_PER_MINUTE = 100;
+    /// @dev ... and at most this far in one observation, however long the pool was quiet before it.
+    uint256 public constant REF_MAX_STEP_BPS = 200;
 
     // ------------------------------------------------------------------ immutables
 
@@ -140,12 +146,13 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     /// Committing first and reading later means no settler can pick the block that seeds an epoch.
     mapping(uint256 => uint256) public fallbackBlock;
     mapping(uint256 => bytes32) public fallbackSeed;
+    mapping(uint256 => uint256) public fallbackAt;
 
-    /// @notice Pool price observations: the last price seen in block `obsBlock`, and the last price of the
-    /// observed block before it. convertPendingImd swaps only near a price fixed in an earlier block.
-    uint160 public obsPrice;
-    uint160 public prevObsPrice;
-    uint64 public obsBlock;
+    /// @notice Rate-limited reference sqrtPrice for convertPendingImd and the time it last moved. It follows the
+    /// pool's observed price by at most REF_RATE_BPS_PER_MINUTE, so moving it far takes holding a price for a long
+    /// time, not one block's trade.
+    uint160 public refPrice;
+    uint64 public refTime;
 
     // ------------------------------------------------------------------ events and errors
 
@@ -303,10 +310,9 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     function convertPendingImd(uint256 minGammaOut) external nonReentrant {
         uint256 amount = pendingImd;
         if (amount == 0) return;
-        // Reference: the pool's last price in an earlier block, which a caller cannot move in this transaction.
+        // Reference: the rate-limited price, which a caller cannot move far with a pump of one block or a few.
         _observe();
-        uint160 ref = obsBlock == block.number ? prevObsPrice : obsPrice;
-        if (ref == 0) return; // no earlier-block price yet: convert later
+        uint160 ref = refPrice;
         uint256 limit = _gammaIs0
             ? uint256(ref) * (BPS + CONVERT_SQRT_TOLERANCE_BPS) / BPS
             : uint256(ref) * (BPS - CONVERT_SQRT_TOLERANCE_BPS) / BPS;
@@ -377,15 +383,24 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         return exactInImd ? abi.encode(gammaOut, imdIn) : abi.encode(imdIn);
     }
 
-    /// @dev Records the pool's current price. Every swap is seen: the hook reports each fee-bearing one and the
-    /// game's own swaps observe here, so `obsPrice` is the last price of block `obsBlock`.
+    /// @dev Moves the reference toward the pool's current price, at most REF_RATE_BPS_PER_MINUTE of elapsed time
+    /// and REF_MAX_STEP_BPS per observation. It moves at most once per timestamp, so repeated observations in a
+    /// block (or before a swap moves the price) cannot push it further.
     function _observe() internal {
         (uint160 price,,,) = StateLibrary.getSlot0(poolManager, PoolIdLibrary.toId(_poolKey));
-        if (obsBlock != block.number) {
-            prevObsPrice = obsPrice;
-            obsBlock = uint64(block.number);
+        uint256 ref = refPrice;
+        if (ref == 0) {
+            refPrice = price;
+            refTime = uint64(block.timestamp);
+            return;
         }
-        obsPrice = price;
+        uint256 dt = block.timestamp - refTime;
+        if (dt == 0) return;
+        refTime = uint64(block.timestamp);
+        uint256 step = _min(dt * REF_RATE_BPS_PER_MINUTE / 60, REF_MAX_STEP_BPS);
+        uint256 hi = ref * (BPS + step) / BPS;
+        uint256 lo = ref * (BPS - step) / BPS;
+        refPrice = uint160(price > hi ? hi : price < lo ? lo : price);
     }
 
     // ------------------------------------------------------------------ settlement
@@ -429,6 +444,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
                 if (commit) {
                     // Nobody chose this block's hash: it is read, and fixed for the epoch, from the next block on.
                     fallbackBlock[e] = block.number;
+                    fallbackAt[e] = block.timestamp;
                     emit FallbackCommitted(e, block.number);
                 }
                 break;
@@ -663,17 +679,20 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         seed = fallbackSeed[e];
         if (seed != bytes32(0)) return (seed, true);
 
-        // A proven drand round always wins over a fallback that has not been read yet.
-        bytes32 r = beacon.randomness(roundForEpoch(e));
-        if (r != bytes32(0)) return (keccak256(abi.encode(r, e)), false);
-
         uint256 committed = fallbackBlock[e];
-        if (committed == 0) return (bytes32(0), block.timestamp >= epochEnd(e) + BEACON_FALLBACK);
+        if (committed == 0) {
+            // Before any commitment a proven drand round seeds the epoch.
+            bytes32 r = beacon.randomness(roundForEpoch(e));
+            if (r != bytes32(0)) return (keccak256(abi.encode(r, e)), false);
+            return (bytes32(0), block.timestamp >= epochEnd(e) + BEACON_FALLBACK);
+        }
+        // Once committed, the commitment is binding: drand is ignored for this epoch, so no settler can hold two
+        // usable seeds and pick one.
         if (block.number <= committed) return (bytes32(0), false); // committed in this block: wait for its hash
         bytes32 h = blockhash(committed);
-        // Unread for 256 blocks, the hash is gone. The commitment is binding and is never renewed (that would let
-        // a lone settler re-roll): the epoch waits for its drand round, which stays provable forever.
-        if (h == bytes32(0)) return (bytes32(0), false);
+        // Unread for 256 blocks, the hash is gone. Renewing is allowed only a day after the commitment, so letting
+        // a known draw expire costs a day of nobody else settling, and the new draw is unknown when it is made.
+        if (h == bytes32(0)) return (bytes32(0), block.timestamp >= fallbackAt[e] + FALLBACK_RECOMMIT_DELAY);
         return (keccak256(abi.encode(h, e, "fallback")), true);
     }
 
@@ -681,7 +700,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     function pendingRound() external view returns (uint64) {
         uint256 e = cursor;
         if (genesis == 0 || e >= currentEpoch() || activeCursor >= activeEpochs.length) return 0;
-        if (activeEpochs[activeCursor] != e || fallbackSeed[e] != bytes32(0)) return 0;
+        if (activeEpochs[activeCursor] != e || fallbackBlock[e] != 0) return 0;
         uint64 round = roundForEpoch(e);
         return beacon.randomness(round) == bytes32(0) ? round : 0;
     }

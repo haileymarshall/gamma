@@ -167,3 +167,34 @@ unchanged (a game that has not started cannot account fees). Test: `test_feeHeld
 - The two audit proofs were copied to `test/scratch/` and failed on the original code (reproduced) before the
   changes; after them, `Proof_0d232182b796` passes and `Proof_aead30a29aef` stops in `setUp` for the reason given
   in change 3.
+
+## Second revision round (reviewer findings)
+
+### 9. `src/GammaGame.sol`: a fallback commitment is binding; drand is ignored once it exists (finding `f9624bc3…`, medium)
+Reproduced: after a commitment both the fallback seed and the drand seed were usable, and the settler chose. `_seed`
+now uses drand only while `fallbackBlock[e] == 0`; once committed, only `blockhash(fallbackBlock[e])` seeds the epoch
+and `pendingRound` stops asking for the round. If that hash expires unread it may be renewed (new `fallbackBlock`,
+recorded in the new `fallbackAt`) only `FALLBACK_RECOMMIT_DELAY` = 1 day after the commitment, so rejecting a known
+draw costs a day in which nobody else settles, and the new draw is unknown when it is made. This replaces change 5's
+"drand wins / never renewed" rule. Tests: `test_proofAfterCommitmentDoesNotChooseSeed`,
+`test_expiredFallbackRecommitsOnlyAfterDelay` (replaces `test_expiredFallbackIsNeverRecommitted`);
+`test_fallbackSeedCannotBeGroundPerBlock` now expects `pendingRound() == 0` after the commitment.
+
+### 10. `src/GammaGame.sol`: `convertPendingImd` reference is rate-limited (finding `9ea7101d…`, medium)
+Reproduced (both a pump held across blocks and a pump unwound by an exact-input sell left a pumped previous-block
+reference). `obsPrice`/`prevObsPrice`/`obsBlock` are replaced by `refPrice`/`refTime`: each observation moves the
+reference toward the pool's current price by at most `REF_RATE_BPS_PER_MINUTE` (1% of sqrtPrice per minute
+elapsed) and at most `REF_MAX_STEP_BPS` (2%) at once, and at most once per timestamp. Moving it 2x therefore takes
+holding the price for over an hour against arbitrage; a stale pre-swap observation moves it one capped step only.
+The conversion bound (1% sqrtPrice past the reference) is unchanged. After a real price move, conversion waits
+until the reference catches up; IMD stays pending meanwhile. Tests: `test_pumpHeldAcrossBlocksDoesNotConvert`,
+`test_pumpAndUnwindLeavesNoStaleReference`, `test_convertAtSettledReference` (replaces
+`test_convertWaitsForEarlierBlockPrice`); `GammaHook.t.sol` `test_exactOutBuyFeeInImdThenConverted` converts in the
+same block again, since the reference exists from the first observation.
+
+New constants (chosen values): `FALLBACK_RECOMMIT_DELAY` 1 day, `REF_RATE_BPS_PER_MINUTE` 100, `REF_MAX_STEP_BPS` 200.
+
+Advisory findings left unchanged: `5f3b7fff` (off-chain drand knowledge with a lagging chain clock; `BEACON_DELAY`
+stays 6 s, changing it moves every epoch's round), `b447e15e` (claim fee measured from the day's end, documented),
+`a5ae147a` (configurator's one-shot initialize is a trust assumption), `6385a04e` (hook must be created with its
+pool in one transaction; the hook is not in this manifest), `9f981c3e` (wei-level rounding dust).

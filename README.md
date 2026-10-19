@@ -90,3 +90,8 @@ Each paid action costs 0.5 IMD, paid with x402 or the onchain Intake contract. S
 ## Risks
 
 GAMMA is an experimental game of chance. Energies can earn nothing, and spent GAMMA is burned, not refunded. Its only market is the GAMMA/IMD pool. The contracts cannot be changed, so any bug is permanent.
+
+## Chosen launch constants
+
+- `FALLBACK_RECOMMIT_DELAY` = 1 day: an expired fallback seed commitment may be renewed only this long after it was made.
+- `REF_RATE_BPS_PER_MINUTE` = 100 and `REF_MAX_STEP_BPS` = 200: how fast the reference price used by `convertPendingImd` follows the pool.

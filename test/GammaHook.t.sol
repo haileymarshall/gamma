@@ -74,10 +74,7 @@ contract GammaHookTest is GammaFixture {
 
         uint256 d = game.today();
         uint256 potBefore = game.getDay(d).pot;
-        game.convertPendingImd(0); // no price from an earlier block yet: waits
-        assertEq(game.pendingImd(), pending);
-        vm.roll(block.number + 1);
-        game.convertPendingImd(0);
+        game.convertPendingImd(0); // the buy moved the price within the reference's tolerance
         assertEq(game.pendingImd(), 0);
         assertEq(imd.balanceOf(address(game)), 0);
         assertGt(game.getDay(d).pot, potBefore);

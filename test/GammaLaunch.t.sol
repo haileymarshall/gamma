@@ -180,7 +180,7 @@ contract GammaLaunchTest is GammaFixture {
         game.settle(256, noProofs); // commits to block 999
         assertEq(game.fallbackBlock(e), 999);
         assertEq(game.cursor(), e);
-        assertEq(game.pendingRound(), game.roundForEpoch(e), "a drand proof is still asked for: it would win");
+        assertEq(game.pendingRound(), 0, "the commitment is binding: drand no longer counts");
         vm.setBlockhash(999, keccak256("the committed block"));
 
         Grinder g = new Grinder();
@@ -227,8 +227,8 @@ contract GammaLaunchTest is GammaFixture {
         assertEq(game.getBatch(b).survivors, game.drawSurvivors(seed, b, 100, game.failBps(0)));
     }
 
-    /// Revision finding a48fbd6d: re-committing an expired fallback let a lone settler re-roll the seed.
-    function test_expiredFallbackIsNeverRecommitted() public {
+    /// Revision finding a48fbd6d / f9624bc3: an expired fallback is renewed only a day later, never by drand.
+    function test_expiredFallbackRecommitsOnlyAfterDelay() public {
         uint256 e = game.currentEpoch();
         buy(alice, 2, 10);
         vm.warp(game.epochEnd(e) + 2 hours);
@@ -236,31 +236,35 @@ contract GammaLaunchTest is GammaFixture {
         game.settle(256, noProofs);
         assertEq(game.fallbackBlock(e), 1000);
         vm.roll(1300); // nobody read it for 256 blocks
-        game.settle(256, noProofs);
-        assertEq(game.fallbackBlock(e), 1000, "commitment is binding");
-        assertEq(game.cursor(), e);
-        vm.roll(1301);
-        game.settle(256, noProofs);
-        assertEq(game.cursor(), e, "waits for drand");
         beacon.set(game.roundForEpoch(e), keccak256("drand"));
         game.settle(256, noProofs);
+        assertEq(game.fallbackBlock(e), 1000, "commitment is binding");
+        assertEq(game.cursor(), e, "drand is not a second option once committed");
+        assertEq(game.epochSeed(e), bytes32(0));
+        vm.warp(block.timestamp + game.FALLBACK_RECOMMIT_DELAY());
+        game.settle(256, noProofs);
+        assertEq(game.fallbackBlock(e), 1300, "renewed after the delay");
+        vm.roll(1301);
+        vm.setBlockhash(1300, keccak256("h"));
+        game.settle(256, noProofs);
         assertGt(game.cursor(), e);
-        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("drand"), e)));
+        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("h"), e, "fallback")));
     }
 
-    /// Revision finding a48fbd6d: a proven drand round wins over a fallback that has not been read yet.
-    function test_proofWinsOverUnreadFallback() public {
+    /// Revision finding f9624bc3: once committed, proving the drand round does not change the epoch's seed.
+    function test_proofAfterCommitmentDoesNotChooseSeed() public {
         uint256 e = game.currentEpoch();
         buy(alice, 2, 10);
         vm.warp(game.epochEnd(e) + 2 hours);
         vm.roll(1000);
         game.settle(256, noProofs);
+        assertEq(game.pendingRound(), 0, "no proof is asked for once committed");
         beacon.set(game.roundForEpoch(e), keccak256("late"));
         vm.roll(1001);
+        vm.setBlockhash(1000, keccak256("h"));
         game.settle(256, noProofs);
         assertGt(game.cursor(), e);
-        assertEq(game.fallbackSeed(e), bytes32(0));
-        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("late"), e)));
+        assertEq(game.epochSeed(e), keccak256(abi.encode(keccak256("h"), e, "fallback")));
     }
 
     function test_proofBeforeFallbackStillWins() public {

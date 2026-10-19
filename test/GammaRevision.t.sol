@@ -29,11 +29,9 @@ contract GammaRevisionTest is GammaFixture {
         assertGt(game.pendingImd(), 0);
     }
 
-    function test_convertWaitsForEarlierBlockPrice() public {
+    function test_convertAtSettledReference() public {
         _pending();
-        uint256 p = game.pendingImd();
-        game.convertPendingImd(0); // all observations are from this block
-        assertEq(game.pendingImd(), p);
+        vm.warp(block.timestamp + 1 hours);
         vm.roll(block.number + 1);
         game.convertPendingImd(0);
         assertEq(game.pendingImd(), 0);
@@ -50,6 +48,50 @@ contract GammaRevisionTest is GammaFixture {
         game.convertPendingImd(0);
         assertEq(game.pendingImd(), p, "nothing converted at the pumped price");
         assertEq(game.gammaHeld(), held);
+    }
+
+    // ---- 9ea7101d: a pump held across blocks moves the reference only at the rate limit
+    function test_pumpHeldAcrossBlocksDoesNotConvert() public {
+        _pending();
+        vm.warp(block.timestamp + 1 hours);
+        vm.roll(block.number + 1);
+        game.convertPendingImd(0); // settles the reference at the fair price, converts the first tranche
+        _pending();
+        uint256 p = game.pendingImd();
+        imd.mint(carol, 60_000_000e18);
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+        swapExactIn(carol, false, 60_000_000e18); // pump, held for the next blocks
+        for (uint256 i; i < 20; ++i) {
+            vm.warp(block.timestamp + 1);
+            vm.roll(block.number + 1);
+            game.convertPendingImd(0);
+        }
+        assertEq(game.pendingImd(), p, "nothing converted while the pump is held");
+    }
+
+    // ---- 9ea7101d (b): a pump unwound in the same block leaves no stale pumped reference
+    function test_pumpAndUnwindLeavesNoStaleReference() public {
+        _pending();
+        vm.warp(block.timestamp + 1 hours);
+        vm.roll(block.number + 1);
+        game.convertPendingImd(0);
+        _pending();
+        uint256 p = game.pendingImd();
+        uint160 before = game.refPrice();
+        vm.warp(block.timestamp + 12);
+        vm.roll(block.number + 1);
+        imd.mint(carol, 100_000_000e18);
+        swapExactIn(carol, false, 60_000_000e18);
+        swapExactIn(carol, true, gamma.balanceOf(carol));
+        uint160 ref = game.refPrice();
+        uint256 d = ref > before ? ref - before : before - ref;
+        assertLe(d, uint256(before) * game.REF_MAX_STEP_BPS() / 10_000, "reference moved at most one step");
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+        swapExactIn(carol, false, 40_000_000e18);
+        game.convertPendingImd(0);
+        assertEq(game.pendingImd(), p, "nothing converted at the re-pumped price");
     }
 
     // ---- deb689d5: unconsumed IMD stays pending
