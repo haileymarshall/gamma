@@ -124,6 +124,17 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     uint256 public totalUnclaimed;
     uint256 public bonusIndex;
 
+    /// @notice The part of `bonusIndex` that an owner's own claim fees produced. An owner's unclaimed winnings never
+    /// collect it: the bonus third of a fee is for the other unclaimed holders, however the claim is split.
+    mapping(address => uint256) public selfBonusIndex;
+
+    struct SelfCheckpoint {
+        uint256 index; // bonusIndex right after the owner's claim
+        uint256 self; // selfBonusIndex[owner] right after it
+    }
+
+    mapping(address => SelfCheckpoint[]) internal _selfCheckpoints;
+
     uint256 public totalBurned;
     uint256 public totalEnergies;
 
@@ -160,6 +171,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     uint8 internal constant SOURCE_TRADING = 0;
     uint8 internal constant SOURCE_DONATION = 1;
     uint8 internal constant SOURCE_SURPLUS = 2;
+    uint8 internal constant SOURCE_STRAY = 3;
 
     constructor(IPoolManager poolManager_, ERC20 imd_, IGammaBeacon beacon_, address configurator_) {
         poolManager = poolManager_;
@@ -278,6 +290,15 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         gamma.safeTransferFrom(msg.sender, address(this), amount);
         gammaHeld += amount;
         _fund(today(), amount, SOURCE_DONATION);
+    }
+
+    /// @notice Credits GAMMA sent to the game with a plain transfer to today's Harvest. Anyone can call. Without
+    /// it such tokens are held by no one: nothing else raises `gammaHeld` for them, so no claim could ever pay them.
+    function sweep() external nonReentrant returns (uint256 amount) {
+        if (genesis == 0) revert NotInitialized();
+        amount = gamma.balanceOf(address(this)) - gammaHeld;
+        gammaHeld += amount;
+        _fund(today(), amount, SOURCE_STRAY);
     }
 
     /// @inheritdoc IGammaGame
@@ -450,6 +471,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
         uint256 winningsTotal;
         uint256 feeTotal;
         uint256 bonusTotal;
+        uint256 selfTotal;
         for (uint256 i; i < ids.length; ++i) {
             Batch storage b = _batches[ids[i]];
             if (b.owner != msg.sender) revert NotOwner();
@@ -463,21 +485,32 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
             uint256 w = _winnings(b, day);
             winningsTotal += w;
             feeTotal += w * feeBps / BPS;
-            bonusTotal += w * (bonusIndex - day.bonusIndex) / INDEX_SCALE;
+            (uint256 bonus, uint256 self) = _bonusOf(msg.sender, w, day.bonusIndex);
+            bonusTotal += bonus;
+            selfTotal += self;
             b.claimed = true;
         }
         if (winningsTotal == 0) return 0;
 
-        // Remove our winnings before sharing the fee, so nobody earns a bonus from their own claim.
+        // Remove our winnings before sharing the fee, so nobody earns a bonus from their own claim. What the
+        // claimant's earlier fees would have paid to their own remaining batches (`selfTotal`) is not paid to them
+        // either but passed on to the other unclaimed holders, so splitting a claim into several calls pays exactly
+        // what one call pays.
         totalUnclaimed -= winningsTotal;
 
         uint256 burnPart = feeTotal / 3;
-        uint256 bonusPart = feeTotal / 3;
-        uint256 harvestPart = feeTotal - burnPart - bonusPart;
+        uint256 bonusPart = feeTotal / 3 + selfTotal;
+        uint256 harvestPart = feeTotal - burnPart - feeTotal / 3;
         if (totalUnclaimed == 0) {
             harvestPart += bonusPart;
         } else {
-            bonusIndex += bonusPart * INDEX_SCALE / totalUnclaimed;
+            uint256 step = bonusPart * INDEX_SCALE / totalUnclaimed;
+            if (step > 0) {
+                bonusIndex += step;
+                uint256 self = selfBonusIndex[msg.sender] + step;
+                selfBonusIndex[msg.sender] = self;
+                _selfCheckpoints[msg.sender].push(SelfCheckpoint({index: bonusIndex, self: self}));
+            }
         }
         if (burnPart > 0) {
             gamma.safeTransfer(DEAD, burnPart);
@@ -494,6 +527,28 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
     function _winnings(Batch storage b, Day storage day) internal view returns (uint256) {
         uint256 pps = _epochs[b.epoch].payPerSurvivor[b.machine];
         return uint256(b.survivors) * pps + uint256(b.energies - b.survivors) * day.perFail;
+    }
+
+    /// @dev Bonus of `w` unclaimed winnings harvested at `dayIndex`: the index growth since the Harvest, minus the
+    /// part the owner's own claim fees produced after that Harvest. Returns (paid to the owner, passed on).
+    function _bonusOf(address owner, uint256 w, uint256 dayIndex) internal view returns (uint256, uint256) {
+        uint256 total = w * (bonusIndex - dayIndex) / INDEX_SCALE;
+        uint256 self = w * (selfBonusIndex[owner] - _selfIndexAt(owner, dayIndex)) / INDEX_SCALE;
+        return (total - self, self);
+    }
+
+    /// @dev The owner's self index at the moment the global index was `dayIndex` (a Harvest): the value after the
+    /// owner's last claim that left `bonusIndex` at or below it. Binary search over the owner's checkpoints.
+    function _selfIndexAt(address owner, uint256 dayIndex) internal view returns (uint256) {
+        SelfCheckpoint[] storage cps = _selfCheckpoints[owner];
+        uint256 lo;
+        uint256 hi = cps.length;
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            if (cps[mid].index <= dayIndex) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo == 0 ? 0 : cps[lo - 1].self;
     }
 
     function _fund(uint256 d, uint256 amount, uint8 source) internal {
@@ -678,7 +733,7 @@ contract GammaGame is IGammaGame, IUnlockCallback, ReentrancyGuard {
             v.harvested = day.finalized;
             if (day.finalized) {
                 v.winnings = _winnings(b, day);
-                v.bonus = v.winnings * (bonusIndex - day.bonusIndex) / INDEX_SCALE;
+                (v.bonus,) = _bonusOf(user, v.winnings, day.bonusIndex);
                 v.feeBps = claimFeeBps(d);
             }
         }
