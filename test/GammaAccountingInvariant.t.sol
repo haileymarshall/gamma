@@ -129,16 +129,23 @@ contract GammaAccountingHandler is Test {
         inflows += game.getDay(game.today()).pot - potBefore;
     }
 
+    /// @dev Conversion may legitimately do nothing (no earlier-block price, price already past the bound) or
+    /// fill partially at the price bound; whatever IMD it consumes must come back as Harvest GAMMA.
     function convert() external cursorMonotonic {
         uint256 pending = game.pendingImd();
         uint256 potBefore = game.getDay(game.today()).pot;
+        uint256 imdBefore = imd.balanceOf(address(game));
         game.convertPendingImd(0);
         uint256 credited = game.getDay(game.today()).pot - potBefore;
         inflows += credited;
-        assertEq(game.pendingImd(), 0);
-        if (pending > 0) {
-            assertGt(credited, 0);
+        uint256 left = game.pendingImd();
+        assertLe(left, pending, "conversion increased pending IMD");
+        assertEq(imdBefore - imd.balanceOf(address(game)), pending - left, "IMD left without pending debit");
+        if (left < pending) {
+            assertGt(credited, 0, "IMD swapped for no GAMMA");
             ++conversions;
+        } else {
+            assertEq(credited, 0, "GAMMA credited without spending IMD");
         }
     }
 
@@ -148,7 +155,7 @@ contract GammaAccountingHandler is Test {
         uint256 next = previous + bound(blocksSeed, 1, 300);
         vm.roll(next);
         // Explicitly supply a hash when the old block is still readable, rather than rely on
-        // the runner's synthetic block history. Gaps over 256 also exercise recommitment.
+        // the runner's synthetic block history. Gaps over 256 expire a commitment, which is never renewed.
         if (next - previous <= 256) vm.setBlockhash(previous, keccak256(abi.encode(previous, "history")));
     }
 

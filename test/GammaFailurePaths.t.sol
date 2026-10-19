@@ -108,6 +108,8 @@ contract GammaFailurePathsTest is GammaFixture {
         uint256 gammaBefore = gamma.balanceOf(address(game));
         uint256 potBefore = game.getDay(game.today()).pot;
         assertGt(pendingBefore, 0);
+        // Conversion needs a price fixed in an earlier block.
+        vm.roll(block.number + 1);
 
         vm.expectRevert(GammaGame.SlippageExceeded.selector);
         game.convertPendingImd(type(uint256).max);
