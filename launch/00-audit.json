@@ -1,6 +1,6 @@
 {
   "objective": "Audit the GAMMA proof-of-play mining game: GammaGame (epoch settlement, Reserve emission, Shares/Harvest accounting, claim fee and unclaimed bonus index, Uniswap v4 swaps through unlock), GammaHook (v4 hook fee taken through BeforeSwapDelta/afterSwap return deltas, game exemption), DrandBeacon (drand evmnet BLS verification) and GammaEmission (closed-form emission). Focus on solvency, settlement liveness, randomness manipulation and hook delta accounting.",
   "template": "audit",
-  "repoUrl": "https://github.com/YOUR_ORG/gamma.git",
-  "baseCommit": "0000000000000000000000000000000000000000"
+  "repoUrl": "https://github.com/haileymarshall/gamma.git",
+  "baseCommit": "b9b13e887d8a8e986d6b3473fc68c94d0dfb10d5"
 }
